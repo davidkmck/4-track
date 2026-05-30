@@ -288,26 +288,18 @@ recordBtn.addEventListener('click', async () => {
         isRecording = false;
       }
     });
-
-    function createTrackNode(blob) {
+function createTrackNode(blob) {
       const trackId = Date.now();
       const audioUrl = URL.createObjectURL(blob);
       const audioEl = new Audio(audioUrl);
       audioEl.loop = true;
 
-      const source = audioCtx.createMediaElementSource(audioEl);
-      const panner = audioCtx.createStereoPanner();
-      const gainNode = audioCtx.createGain();
-      
-      source.connect(gainNode);
-      gainNode.connect(panner);
-      panner.connect(audioCtx.destination);
-
+      // iOS Safari Compatibility: Do not connect MediaElementSource to live destination.
+      // Instead, we will let the Audio element play directly to the device hardware,
+      // which Safari fully permits after our pre-warming click.
       const trackObject = {
         id: trackId,
         audioEl,
-        panner,
-        gainNode,
         blob,
         currentPan: 0,
         currentVolume: 1.0
@@ -356,7 +348,9 @@ recordBtn.addEventListener('click', async () => {
       const track = tracks.find(t => t.id === id);
       if (track) {
         track.currentVolume = parseFloat(val);
-        track.gainNode.gain.value = track.currentVolume;
+        // Change the native HTML element volume directly so Safari honors it
+        // Note: HTML audio volume maxes out at 1.0 natively
+        track.audioEl.volume = Math.min(1.0, track.currentVolume);
         document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
       }
     }
@@ -365,9 +359,11 @@ recordBtn.addEventListener('click', async () => {
       const track = tracks.find(t => t.id === id);
       if (track) {
         track.currentPan = parseFloat(val);
-        track.panner.pan.value = track.currentPan;
+        // Live panning will be applied to the downmixed exported file, 
+        // as HTML5 <audio> tags do not support native mono-to-stereo panning without the Web Audio graph.
       }
     }
+    
 
     function deleteTrack(id) {
       stopAllTracks();
