@@ -98,6 +98,64 @@
       color: white;
     }
 
+    /* Loop Toggle Container styling */
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background-color: var(--card-bg);
+      padding: 12px 15px;
+      border-radius: 8px;
+      margin-top: 5px;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 50px;
+      height: 26px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider-toggle {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #475569;
+      transition: .3s;
+      border-radius: 34px;
+    }
+
+    .slider-toggle:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider-toggle {
+      background-color: var(--accent);
+    }
+
+    input:checked + .slider-toggle:before {
+      transform: translateX(24px);
+    }
+
     /* Mixer Board Layout */
     .mixer-board {
       display: flex;
@@ -177,6 +235,15 @@
         <button id="master-play-btn" class="btn-global" disabled>Play Mix</button>
         <button id="reset-btn" class="btn-global" disabled>Restart from 0</button>
       </div>
+      
+      <div class="toggle-container">
+        <span>Master Loop Repeat</span>
+        <label class="switch">
+          <input type="checkbox" id="loop-toggle" checked>
+          <span class="slider-toggle"></span>
+        </label>
+      </div>
+
       <button id="save-mix-btn" class="btn-save" disabled>Save Mix to File</button>
     </section>
 
@@ -191,13 +258,14 @@
     let isRecording = false;
     let isPlayingMix = false;
     let localStream = null;
-    let masterLoopInterval = null; // High-frequency loop timing engine ticker
+    let masterLoopInterval = null; 
     const maxTracks = 4;
     const tracks = [];
 
     const recordBtn = document.getElementById('record-btn');
     const masterPlayBtn = document.getElementById('master-play-btn');
     const resetBtn = document.getElementById('reset-btn');
+    const loopToggle = document.getElementById('loop-toggle');
     const saveMixBtn = document.getElementById('save-mix-btn');
     const mixerBoard = document.getElementById('mixer-board');
 
@@ -230,7 +298,6 @@
     recordBtn.addEventListener('click', async () => {
       initAudio();
       
-      // iOS Essential: "Pre-warm" and unlock all existing audio tracks on user gesture
       if (tracks && tracks.length > 0) {
         tracks.forEach(t => {
           if (t.audioEl) {
@@ -257,12 +324,10 @@
             if (e.data.size > 0) recordedChunks.push(e.data);
           };
 
-           mediaRecorder.onstop = () => {
+          mediaRecorder.onstop = () => {
             stopAllTracks();
             const blob = new Blob(recordedChunks, { type: 'audio/webm' });
             
-            // iOS Ultimate Fix: Convert the raw blob into an inline Base64 Data URL
-            // This forces mobile Safari to treat the audio as safe native data.
             const reader = new FileReader();
             reader.readAsDataURL(blob);
             reader.onloadend = () => {
@@ -294,14 +359,13 @@
 
     function createTrackNode(blob, base64DataUrl) {
       const trackId = Date.now();
-      // Use the Base64 Data URL for live playback to bypass Safari's blob block
       const audioEl = new Audio(base64DataUrl);
       audioEl.loop = false;
 
       const trackObject = {
         id: trackId,
         audioEl,
-        blob, // Keep the original raw blob safe here so the Save Mix WAV engine still works!
+        blob, 
         currentPan: 0,
         currentVolume: 1.0,
         duration: 0
@@ -314,7 +378,6 @@
       tracks.push(trackObject);
       renderMixerBoard();
     }
-    
 
     function renderMixerBoard() {
       mixerBoard.innerHTML = '';
@@ -360,7 +423,6 @@
       }
     }
 
-    // Panning applied upon downmix file generation export
     function updatePan(id, val) {
       const track = tracks.find(t => t.id === id);
       if (track) {
@@ -381,7 +443,6 @@
     function startAllTracks(options = {}) {
       if (!tracks || tracks.length === 0) return;
       
-      // Force resume running state if browser backgrounded it
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
@@ -397,7 +458,6 @@
         masterPlayBtn.textContent = "Pause Mix";
       }
 
-      // Start the Master Sync Watcher Engine loop monitoring routine
       clearInterval(masterLoopInterval);
       masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
     }
@@ -419,22 +479,26 @@
       });
     }
 
-    // Unified Looping Coordinator logic
     function checkMasterLoopTimeline() {
       if (!tracks || tracks.length === 0) return;
 
-      // Find the track with the longest recorded hardware layout path
       const activeLengths = tracks.map(t => t.duration || t.audioEl.duration || 0);
       const maxDuration = Math.max(...activeLengths);
 
       if (maxDuration === 0) return;
 
-      // Locate the master audio track element running the timeline
       const masterTrack = tracks.find(t => (t.duration || t.audioEl.duration) === maxDuration);
       
       if (masterTrack && masterTrack.audioEl) {
-        // When the master track hits the finish line (or near-end loop boundaries)
         if (masterTrack.audioEl.ended || masterTrack.audioEl.currentTime >= maxDuration - 0.02) {
+          
+          // Checked State Evaluation: If loop is un-checked, cleanly halt playback instead of repeating
+          if (!loopToggle.checked) {
+            stopAllTracks();
+            resetAllPlayheads();
+            return;
+          }
+
           resetAllPlayheads();
           tracks.forEach(track => {
             if (track.audioEl) {
@@ -521,6 +585,7 @@
       }
     });
 
+    // WAV Encoder
     function audioBufferToWav(buffer) {
       const numOfChan = buffer.numberOfChannels;
       const sampleRate = buffer.sampleRate;
