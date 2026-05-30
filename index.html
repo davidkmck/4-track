@@ -114,6 +114,12 @@
       font-size: 0.95rem;
     }
 
+    .toggle-label-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .switch {
       position: relative;
       display: inline-block;
@@ -244,7 +250,10 @@
       </div>
       
       <div class="toggle-container">
-        <span>Master Loop Repeat</span>
+        <div class="toggle-label-group">
+          <span>🔁</span>
+          <span>Master Loop Repeat</span>
+        </div>
         <label class="switch">
           <input type="checkbox" id="loop-toggle" checked>
           <span class="slider-toggle"></span>
@@ -305,41 +314,9 @@
     recordBtn.addEventListener('click', async () => {
       initAudio();
       
-      for (let i = 0; i < maxTracks; i++) {
+      // Safety fix: "Pre-warm" only the audio elements we have captured so far, 
+      // preventing uninitialized DOM nodes from locking up the execution loop.
+      const tracksToWarm = Math.max(1, tracks.length);
+      for (let i = 0; i < tracksToWarm; i++) {
         const aud = document.getElementById(`ios-audio-${i}`);
         if (aud) {
-          aud.play().catch(() => {});
-          aud.pause();
-        }
-      }
-      
-      if (!isRecording) {
-        if (tracks.length >= maxTracks) return;
-        try {
-          recordedChunks = [];
-          
-          if (tracks && tracks.length > 0) {
-            resetAllPlayheads();
-            startAllTracks({ monitoringOnly: true });
-          }
-
-          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-          mediaRecorder = new MediaRecorder(localStream);
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) recordedChunks.push(e.data);
-          };
-
-          mediaRecorder.onstop = () => {
-            stopAllTracks();
-            const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-            
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => {
-              const base64DataUrl = reader.result;
-              createTrackNode(blob, base64DataUrl);
-            };
-            
-            if (localStream) {
-              localStream.get
