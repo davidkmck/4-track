@@ -12,6 +12,7 @@
       --text-main: #f8fafc;
       --accent: #3b82f6;
       --danger: #ef4444;
+      --success: #10b981;
     }
 
     body {
@@ -89,6 +90,11 @@
 
     .btn-global {
       background-color: #475569;
+      color: white;
+    }
+
+    .btn-save {
+      background-color: var(--success);
       color: white;
     }
 
@@ -171,6 +177,7 @@
         <button id="master-play-btn" class="btn-global" disabled>Play Mix</button>
         <button id="reset-btn" class="btn-global" disabled>Restart from 0</button>
       </div>
+      <button id="save-mix-btn" class="btn-save" disabled>Save Mix to File</button>
     </section>
 
     <section class="mixer-board" id="mixer-board">
@@ -189,6 +196,7 @@
     const recordBtn = document.getElementById('record-btn');
     const masterPlayBtn = document.getElementById('master-play-btn');
     const resetBtn = document.getElementById('reset-btn');
+    const saveMixBtn = document.getElementById('save-mix-btn');
     const mixerBoard = document.getElementById('mixer-board');
 
     function initAudio() {
@@ -209,13 +217,11 @@
       }
     });
 
-    // Replay from Time 0
     resetBtn.addEventListener('click', () => {
       initAudio();
       tracks.forEach(track => {
         track.audioEl.currentTime = 0;
       });
-      // If it wasn't already playing, auto-start playback for convenience
       if (!isPlayingMix) {
         startAllTracks();
       }
@@ -230,8 +236,11 @@
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           recordedChunks = [];
           
-          // Align heads to 0 before layered tracking
-          tracks.forEach(t => t.audioEl.currentTime = 0);
+          // CRITICAL FIX: Explicitly snap all existing playback channels to 0 before starting recording
+          tracks.forEach(t => {
+            t.audioEl.currentTime = 0;
+          });
+          
           startAllTracks({ monitoringOnly: true });
 
           mediaRecorder = new MediaRecorder(stream);
@@ -269,19 +278,21 @@
 
       const source = audioCtx.createMediaElementSource(audioEl);
       const panner = audioCtx.createStereoPanner();
-      const gainNode = audioCtx.createGain(); // Track Volume Node
+      const gainNode = audioCtx.createGain();
       
-      // Signal chain: Source -> Volume -> Pan -> Master Output
       source.connect(gainNode);
       gainNode.connect(panner);
       panner.connect(audioCtx.destination);
 
+      // Keep track of parameters for active mixers and export values
       const trackObject = {
         id: trackId,
         audioEl,
         panner,
         gainNode,
-        blob
+        blob,
+        currentPan: 0,
+        currentVolume: 1.0
       };
 
       tracks.push(trackObject);
@@ -302,9 +313,9 @@
             <div class="slider-container">
               <div class="slider-label">
                 <span>Volume</span>
-                <span id="vol-txt-${track.id}">${Math.round(track.gainNode.gain.value * 100)}%</span>
+                <span id="vol-txt-${track.id}">${Math.round(track.currentVolume * 100)}%</span>
               </div>
-              <input type="range" min="0" max="1.5" step="0.05" value="${track.gainNode.gain.value}" 
+              <input type="range" min="0" max="1.5" step="0.05" value="${track.currentVolume}" 
                 oninput="updateVolume(${track.id}, this.value)">
             </div>
             <div class="slider-container">
@@ -313,7 +324,7 @@
                 <span>Stereo Pan</span>
                 <span>Right</span>
               </div>
-              <input type="range" min="-1" max="1" step="0.1" value="${track.panner.pan.value}" 
+              <input type="range" min="-1" max="1" step="0.1" value="${track.currentPan}" 
                 oninput="updatePan(${track.id}, this.value)">
             </div>
           </div>
@@ -326,14 +337,18 @@
     function updateVolume(id, val) {
       const track = tracks.find(t => t.id === id);
       if (track) {
-        track.gainNode.gain.value = parseFloat(val);
+        track.currentVolume = parseFloat(val);
+        track.gainNode.gain.value = track.currentVolume;
         document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
       }
     }
 
     function updatePan(id, val) {
       const track = tracks.find(t => t.id === id);
-      if (track) track.panner.pan.value = parseFloat(val);
+      if (track) {
+        track.currentPan = parseFloat(val);
+        track.panner.pan.value = track.currentPan;
+      }
     }
 
     function deleteTrack(id) {
@@ -368,6 +383,7 @@
       const noTracks = tracks.length === 0;
       masterPlayBtn.disabled = noTracks;
       resetBtn.disabled = noTracks;
+      saveMixBtn.disabled = noTracks;
       
       if (tracks.length >= maxTracks) {
         recordBtn.disabled = true;
@@ -379,6 +395,24 @@
         recordBtn.className = "btn-record";
       }
     }
-  </script>
-</body>
-</html>
+
+    // --- Offline Rendering & WAV Export Engine ---
+    saveMixBtn.addEventListener('click', async () => {
+      if (tracks.length === 0) return;
+      initAudio();
+      saveMixBtn.disabled = true;
+      saveMixBtn.textContent = "Rendering Mix...";
+
+      try {
+        // Decode all raw blobs into AudioBuffers to get true lengths
+        const decodePromises = tracks.map(async (track) => {
+          const arrayBuffer = await track.blob.arrayBuffer();
+          // Use a clean temporary context to safe-decode file lengths
+          const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const buffer = await tempCtx.decodeAudioData(arrayBuffer);
+          tempCtx.close();
+          return buffer;
+        });
+
+        const audioBuffers = await Promise.all(decodePromises);
+        
