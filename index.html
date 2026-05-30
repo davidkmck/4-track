@@ -373,6 +373,7 @@
       }
     });
 
+    // FIX: Restored function signature parameters to handle both raw bytes and the base64 media stream properly
     function createTrackNode(blob, base64DataUrl) {
       const trackIndex = tracks.length;
       const audioEl = document.getElementById(`ios-audio-${trackIndex}`);
@@ -556,4 +557,122 @@
 
       try {
         const decodePromises = tracks.map(async (track) => {
-          const array
+          const arrayBuffer = await track.blob.arrayBuffer();
+          const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const buffer = await tempCtx.decodeAudioData(arrayBuffer);
+          tempCtx.close();
+          return buffer;
+        });
+
+        const audioBuffers = await Promise.all(decodePromises);
+        const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
+        const sampleRate = audioCtx.sampleRate;
+        const offlineCtx = new OfflineAudioContext(2, sampleRate * maxDuration, sampleRate);
+
+        tracks.forEach((track, index) => {
+          const bufferSource = offlineCtx.createBufferSource();
+          bufferSource.buffer = audioBuffers[index];
+
+          const offlineGain = offlineCtx.createGain();
+          offlineGain.gain.value = track.currentVolume;
+
+          const offlinePanner = offlineCtx.createStereoPanner();
+          offlinePanner.pan.value = track.currentPan;
+
+          bufferSource.connect(offlineGain);
+          offlineGain.connect(offlinePanner);
+          offlinePanner.connect(offlineCtx.destination);
+
+          bufferSource.start(0);
+        });
+
+        const renderedBuffer = await offlineCtx.startRendering();
+        const wavBlob = audioBufferToWav(renderedBuffer);
+        const downloadUrl = URL.createObjectURL(wavBlob);
+        
+        const anchor = document.createElement('a');
+        anchor.href = downloadUrl;
+        anchor.download = `4track-mix-${Date.now()}.wav`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(downloadUrl);
+
+      } catch (err) {
+        console.error("Export failure:", err);
+        alert("Failed to export the audio mix.");
+      } finally {
+        saveMixBtn.disabled = false;
+        saveMixBtn.textContent = "💾 Save Mix to File";
+      }
+    });
+
+    function audioBufferToWav(buffer) {
+      const numOfChan = buffer.numberOfChannels;
+      const sampleRate = buffer.sampleRate;
+      const format = 1; 
+      const bitDepth = 16;
+      
+      let result;
+      if (numOfChan === 2) {
+        result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
+      } else {
+        result = buffer.getChannelData(0);
+      }
+      
+      const bufferArr = new ArrayBuffer(44 + result.length * 2);
+      const view = new DataView(bufferArr);
+      
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + result.length * 2, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, format, true);
+      view.setUint16(22, numOfChan, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
+      view.setUint16(32, numOfChan * (bitDepth / 8), true);
+      view.setUint16(34, bitDepth, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, result.length * 2, true);
+      
+      let offset = 44;
+      for (let i = 0; i < result.length; i++, offset += 2) {
+        let s = Math.max(-1, Math.min(1, result[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      
+      return new Blob([view], { type: 'audio/wav' });
+    }
+
+    function interleave(inputL, inputR) {
+      const length = inputL.length + inputR.length;
+      const result = new Float32Array(length);
+      let index = 0;
+      let inputIndex = 0;
+      
+      while (index < length) {
+        result[index++] = inputL[inputIndex];
+        result[index++] = inputR[inputIndex];
+        inputIndex++;
+      }
+      return result;
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then(reg => console.log('Service Worker connected!'))
+          .catch(err => console.log('SW registration issue: ', err));
+      });
+    }
+  </script>
+</body>
+</html>
