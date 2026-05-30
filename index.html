@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Layered Multitrack Mixer</title>
+  <link rel="stylesheet" href="./manifest.json">
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --text-main: #f8fafc;
+      --accent: #3b82f6;
+      --danger: #ef4444;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    main {
+      width: 100%;
+      max-width: 500px;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 1.75rem;
+      margin-bottom: 5px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 0.9rem;
+      margin-bottom: 25px;
+    }
+
+    #controls-sector {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-bottom: 30px;
+    }
+
+    button {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: opacity 0.2s;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-record {
+      background-color: var(--accent);
+      color: white;
+    }
+
+    .btn-recording {
+      background-color: var(--danger);
+      animation: pulse 1.5s infinite;
+      color: white;
+    }
+
+    .btn-global {
+      background-color: #475569;
+      color: white;
+    }
+
+    /* Mixer Board Layout */
+    .mixer-board {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .track-row {
+      background-color: var(--card-bg);
+      padding: 15px;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    }
+
+    .track-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .track-title {
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    .btn-delete {
+      background-color: transparent;
+      color: var(--danger);
+      padding: 5px 10px;
+      font-size: 0.85rem;
+    }
+
+    .controls-row {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .slider-container {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .slider-label {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <main>
+    <h1>Layered Multitrack Studio</h1>
+    <div class="subtitle">Record cumulative tracks via microphone</div>
+
+    <section id="controls-sector">
+      <button id="record-btn" class="btn-record">Record Track 1</button>
+      <button id="master-play-btn" class="btn-global" disabled>Play Mix</button>
+    </section>
+
+    <section class="mixer-board" id="mixer-board">
+      </section>
+  </main>
+
+  <script>
+    let audioCtx = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let isRecording = false;
+    let isPlayingMix = false;
+    const maxTracks = 4;
+    const tracks = [];
+
+    const recordBtn = document.getElementById('record-btn');
+    const masterPlayBtn = document.getElementById('master-play-btn');
+    const mixerBoard = document.getElementById('mixer-board');
+
+    // Initialize Audio Context on user gesture
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    // Toggle global Playback
+    masterPlayBtn.addEventListener('click', () => {
+      initAudio();
+      if (isPlayingMix) {
+        stopAllTracks();
+      } else {
+        startAllTracks();
+      }
+    });
+
+    // Handle recording action
+    recordBtn.addEventListener('click', async () => {
+      initAudio();
+      
+      if (!isRecording) {
+        if (tracks.length >= maxTracks) return;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          recordedChunks = [];
+          
+          // Play existing tracks simultaneously to build layers
+          startAllTracks({ monitoringOnly: true });
+
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            // Stop any playing backup tracks immediately when recording cuts off
+            stopAllTracks();
+            
+            const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+            createTrackNode(blob);
+            stream.getTracks().forEach(track => track.stop());
+            updateUI();
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          recordBtn.textContent = "Stop Recording";
+          recordBtn.className = "btn-recording";
+        } catch (err) {
+          console.error('Microphone access denied or error:', err);
+          alert('Could not access microphone.');
+        }
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+      }
+    });
+
+    // Create tracking nodes inside our framework
+    function createTrackNode(blob) {
+      const trackId = Date.now();
+      const audioUrl = URL.createObjectURL(blob);
+      const audioEl = new Audio(audioUrl);
+      audioEl.loop = true;
+
+      // Web Audio processing assembly line
+      const source = audioCtx.createMediaElementSource(audioEl);
+      const panner = audioCtx.createStereoPanner();
+      
+      source.connect(panner);
+      panner.connect(audioCtx.destination);
+
+      const trackObject = {
+        id: trackId,
+        audioEl,
+        panner,
+        blob
+      };
+
+      tracks.push(trackObject);
+      renderMixerBoard();
+    }
+
+    function renderMixerBoard() {
+      mixerBoard.innerHTML = '';
+      tracks.forEach((track, index) => {
+        const row = document.createElement('div');
+        row.className = 'track-row';
+        row.innerHTML = `
+          <div class="track-header">
+            <span class="track-title">Track ${index + 1}</span>
+            <button class="btn-delete" onclick="deleteTrack(${track.id})">Delete</button>
+          </div>
+          <div class="controls-row">
+            <div class="slider-container">
+              <div class="slider-label">
+                <span>Left</span>
+                <span>Stereo Pan</span>
+                <span>Right</span>
+              </div>
+              <input type="range" min="-1" max="1" step="0.1" value="${track.panner.pan.value}" 
+                oninput="updatePan(${track.id}, this.value)">
+            </div>
+          </div>
+        `;
+        mixerBoard.appendChild(row);
+      });
+      updateUI();
+    }
+
+    function updatePan(id, val) {
+      const track = tracks.find(t => t.id === id);
+      if (track) track.panner.pan.value = parseFloat(val);
+    }
+
+    function deleteTrack(id) {
+      stopAllTracks();
+      const index = tracks.findIndex(t => t.id === id);
+      if (index !== -1) {
+        tracks[index].audioEl.pause();
+        tracks.splice(index, 1);
+      }
+      renderMixerBoard();
+    }
+
+    function startAllTracks(options = {}) {
+      tracks.forEach(track => {
+        track.audioEl.currentTime = 0;
+        track.audioEl.play().catch(e => console.log("Playback interrupted: ", e));
+      });
+      if (!options.monitoringOnly) {
+        isPlayingMix = true;
+        masterPlayBtn.textContent = "Pause Mix";
+      }
+    }
+
+    function stopAllTracks() {
+      tracks.forEach(track => {
+        track.audioEl.pause();
+      });
+      isPlayingMix = false;
+      masterPlayBtn.textContent = "Play Mix";
+    }
+
+    function updateUI() {
+      masterPlayBtn.disabled = tracks.length === 0;
+      
+      if (tracks.length >= maxTracks) {
+        recordBtn.disabled = true;
+        recordBtn.textContent = "Max 4 Tracks Reached";
+        recordBtn.className = "btn-record";
+      } else {
+        recordBtn.disabled = false;
+        recordBtn.textContent = `Record Track ${tracks.length + 1}`;
+        recordBtn.className = "btn-record";
+      }
+    }
+  </script>
+</body>
+</html>
