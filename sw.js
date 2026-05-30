@@ -1,4 +1,4 @@
-const CACHE_NAME = '4-track-v2';
+const CACHE_NAME = '4-track-v3';
 const ASSETS = [
   '/4-track/',
   '/4-track/index.html',
@@ -6,7 +6,6 @@ const ASSETS = [
   '/4-track/icon.png'
 ];
 
-// Install Service Worker and cache core assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -16,7 +15,6 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate and clean old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -32,7 +30,6 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch strategy - Network first, fallback to cache
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request).catch(() => {
