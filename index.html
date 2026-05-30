@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Layered Multitrack Mixer</title>
+  <title>Quick Multitrack</title>
   <link rel="stylesheet" href="./manifest.json">
   <style>
     :root {
@@ -168,7 +168,7 @@
 <body>
 
   <main>
-    <h1>Layered Multitrack Studio</h1>
+    <h1>Quick Multitrack</h1>
     <div class="subtitle">Record cumulative tracks via microphone</div>
 
     <section id="controls-sector">
@@ -190,6 +190,7 @@
     let recordedChunks = [];
     let isRecording = false;
     let isPlayingMix = false;
+    let localStream = null;
     const maxTracks = 4;
     const tracks = [];
 
@@ -228,22 +229,28 @@
     });
 
     recordBtn.addEventListener('click', async () => {
+      // 1. Initialize audio framework context cleanly first
       initAudio();
       
       if (!isRecording) {
         if (tracks.length >= maxTracks) return;
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // 2. Request microphone stream access channel explicit loop
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           recordedChunks = [];
           
-          // CRITICAL FIX: Explicitly snap all existing playback channels to 0 before starting recording
+          // 3. Set existing playheads back to baseline alignment
           tracks.forEach(t => {
             t.audioEl.currentTime = 0;
           });
           
-          startAllTracks({ monitoringOnly: true });
+          // 4. Spin up backing tracks if they exist
+          if (tracks.length > 0) {
+            startAllTracks({ monitoringOnly: true });
+          }
 
-          mediaRecorder = new MediaRecorder(stream);
+          // 5. Build and fire standard safe recording pipeline
+          mediaRecorder = new MediaRecorder(localStream);
           mediaRecorder.ondataavailable = (e) => {
             if (e.data.size > 0) recordedChunks.push(e.data);
           };
@@ -252,7 +259,11 @@
             stopAllTracks();
             const blob = new Blob(recordedChunks, { type: 'audio/webm' });
             createTrackNode(blob);
-            stream.getTracks().forEach(track => track.stop());
+            
+            // Clean up microphone hardware connection instantly
+            if (localStream) {
+              localStream.getTracks().forEach(track => track.stop());
+            }
             updateUI();
           };
 
@@ -262,10 +273,12 @@
           recordBtn.className = "btn-recording";
         } catch (err) {
           console.error('Microphone access denied:', err);
-          alert('Could not access microphone.');
+          alert('Could not access microphone. Check site permissions.');
         }
       } else {
-        mediaRecorder.stop();
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
         isRecording = false;
       }
     });
@@ -284,7 +297,6 @@
       gainNode.connect(panner);
       panner.connect(audioCtx.destination);
 
-      // Keep track of parameters for active mixers and export values
       const trackObject = {
         id: trackId,
         audioEl,
@@ -404,10 +416,8 @@
       saveMixBtn.textContent = "Rendering Mix...";
 
       try {
-        // Decode all raw blobs into AudioBuffers to get true lengths
         const decodePromises = tracks.map(async (track) => {
           const arrayBuffer = await track.blob.arrayBuffer();
-          // Use a clean temporary context to safe-decode file lengths
           const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
           const buffer = await tempCtx.decodeAudioData(arrayBuffer);
           tempCtx.close();
@@ -415,4 +425,59 @@
         });
 
         const audioBuffers = await Promise.all(decodePromises);
+        const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
+        const sampleRate = audioCtx.sampleRate;
+        const offlineCtx = new OfflineAudioContext(2, sampleRate * maxDuration, sampleRate);
+
+        tracks.forEach((track, index) => {
+          const bufferSource = offlineCtx.createBufferSource();
+          bufferSource.buffer = audioBuffers[index];
+
+          const offlineGain = offlineCtx.createGain();
+          offlineGain.gain.value = track.currentVolume;
+
+          const offlinePanner = offlineCtx.createStereoPanner();
+          offlinePanner.pan.value = track.currentPan;
+
+          bufferSource.connect(offlineGain);
+          offlineGain.connect(offlinePanner);
+          offlinePanner.connect(offlineCtx.destination);
+
+          bufferSource.start(0);
+        });
+
+        const renderedBuffer = await offlineCtx.startRendering();
+        const wavBlob = audioBufferToWav(renderedBuffer);
+        const downloadUrl = URL.createObjectURL(wavBlob);
         
+        const anchor = document.createElement('a');
+        anchor.href = downloadUrl;
+        anchor.download = `4track-mix-${Date.now()}.wav`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(downloadUrl);
+
+      } catch (err) {
+        console.error("Export failure:", err);
+        alert("Failed to export the audio mix.");
+      } finally {
+        saveMixBtn.disabled = false;
+        saveMixBtn.textContent = "Save Mix to File";
+      }
+    });
+
+    function audioBufferToWav(buffer) {
+      const numOfChan = buffer.numberOfChannels;
+      const sampleRate = buffer.sampleRate;
+      const format = 1; 
+      const bitDepth = 16;
+      
+      let result;
+      if (numOfChan === 2) {
+        result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
+      } else {
+        result = buffer.getChannelData(0);
+      }
+      
+      const bufferArr = new ArrayBuffer(44 + result.length *
