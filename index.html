@@ -220,81 +220,65 @@
 
     resetBtn.addEventListener('click', () => {
       initAudio();
-      tracks.forEach(track => {
-        track.audioEl.currentTime = 0;
-      });
-      if (!isPlayingMix) {
+      if (tracks && tracks.length > 0) {
+        tracks.forEach(track => {
+          if (track.audioEl) track.audioEl.currentTime = 0;
+        });
+      }
+      if (!isPlayingMix && tracks.length > 0) {
         startAllTracks();
       }
     });
 
     recordBtn.addEventListener('click', async () => {
-  // 1. Instantly wake up the AudioContext on the exact microsecond of the user tap
-  initAudio();
-  
-  if (!isRecording) {
-    if (tracks.length >= maxTracks) return;
-    
-    // Check if the browser even supports media devices in this context
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      alert("Your browser is blocking microphone access in this view. Try opening this page in a normal browser tab instead of the installed app shortcut.");
-      return;
-    }
-
-    try {
-      // 2. Request the stream channel explicitly
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
-        } 
-      });
+      initAudio();
       
-      localStream = stream;
-      recordedChunks = [];
-      
-      // 3. Snap playheads to baseline
-      tracks.forEach(t => {
-        t.audioEl.currentTime = 0;
-      });
-      
-      if (tracks.length > 0) {
-        startAllTracks({ monitoringOnly: true });
-      }
+      if (!isRecording) {
+        if (tracks.length >= maxTracks) return;
+        try {
+          recordedChunks = [];
+          
+          // Fixed safety check: Only reset loop timestamps if tracks actually exist yet
+          if (tracks && tracks.length > 0) {
+            tracks.forEach(t => {
+              if (t.audioEl) t.audioEl.currentTime = 0;
+            });
+            startAllTracks({ monitoringOnly: true });
+          }
 
-      mediaRecorder = new MediaRecorder(localStream);
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunks.push(e.data);
-      };
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      mediaRecorder.onstop = () => {
-        stopAllTracks();
-        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-        createTrackNode(blob);
-        
-        if (localStream) {
-          localStream.getTracks().forEach(track => track.stop());
+          mediaRecorder = new MediaRecorder(localStream);
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            stopAllTracks();
+            const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+            createTrackNode(blob);
+            
+            if (localStream) {
+              localStream.getTracks().forEach(track => track.stop());
+            }
+            updateUI();
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          recordBtn.textContent = "Stop Recording";
+          recordBtn.className = "btn-recording";
+        } catch (err) {
+          console.error('Microphone access denied:', err);
+          alert('Could not access microphone. Check site permissions.');
         }
-        updateUI();
-      };
-
-      mediaRecorder.start();
-      isRecording = true;
-      recordBtn.textContent = "Stop Recording";
-      recordBtn.className = "btn-recording";
-    } catch (err) {
-      console.error('Microphone hardware error:', err);
-      alert(`Microphone error: ${err.name}. Please check your phone settings.`);
-    }
-  } else {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
-      mediaRecorder.stop();
-    }
-    isRecording = false;
-  }
-});
-
+      } else {
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+        isRecording = false;
+      }
+    });
 
     function createTrackNode(blob) {
       const trackId = Date.now();
@@ -387,8 +371,11 @@
     }
 
     function startAllTracks(options = {}) {
+      if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
-        track.audioEl.play().catch(e => console.log("Playback interrupted: ", e));
+        if (track.audioEl) {
+          track.audioEl.play().catch(e => console.log("Playback delayed: ", e));
+        }
       });
       if (!options.monitoringOnly) {
         isPlayingMix = true;
@@ -397,15 +384,16 @@
     }
 
     function stopAllTracks() {
+      if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
-        track.audioEl.pause();
+        if (track.audioEl) track.audioEl.pause();
       });
       isPlayingMix = false;
       masterPlayBtn.textContent = "Play Mix";
     }
 
     function updateUI() {
-      const noTracks = tracks.length === 0;
+      const noTracks = !tracks || tracks.length === 0;
       masterPlayBtn.disabled = noTracks;
       resetBtn.disabled = noTracks;
       saveMixBtn.disabled = noTracks;
@@ -423,7 +411,7 @@
 
     // --- Offline Rendering & WAV Export Engine ---
     saveMixBtn.addEventListener('click', async () => {
-      if (tracks.length === 0) return;
+      if (!tracks || tracks.length === 0) return;
       initAudio();
       saveMixBtn.disabled = true;
       saveMixBtn.textContent = "Rendering Mix...";
@@ -493,4 +481,60 @@
         result = buffer.getChannelData(0);
       }
       
-      const bufferArr = new ArrayBuffer(44 + result.length *
+      const bufferArr = new ArrayBuffer(44 + result.length * 2);
+      const view = new DataView(bufferArr);
+      
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + result.length * 2, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, format, true);
+      view.setUint16(22, numOfChan, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
+      view.setUint16(32, numOfChan * (bitDepth / 8), true);
+      view.setUint16(34, bitDepth, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, result.length * 2, true);
+      
+      let offset = 44;
+      for (let i = 0; i < result.length; i++, offset += 2) {
+        let s = Math.max(-1, Math.min(1, result[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      
+      return new Blob([view], { type: 'audio/wav' });
+    }
+
+    function interleave(inputL, inputR) {
+      const length = inputL.length + inputR.length;
+      const result = new Float32Array(length);
+      let index = 0;
+      let inputIndex = 0;
+      
+      while (index < length) {
+        result[index++] = inputL[inputIndex];
+        result[index++] = inputR[inputIndex];
+        inputIndex++;
+      }
+      return result;
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    // Service Worker relative registration link setup
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then(reg => console.log('Service Worker connected!'))
+          .catch(err => console.log('SW registration issue: ', err));
+      });
+    }
+  </script>
+</body>
+</html>
