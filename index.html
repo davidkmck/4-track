@@ -63,7 +63,7 @@
       border-radius: 8px;
       font-weight: 600;
       cursor: pointer;
-      font-size: 1rem;
+      font-size: 1.25rem; /* Enhanced visibility for pure iconography */
       transition: opacity 0.2s;
       flex: 1;
       display: flex;
@@ -82,6 +82,7 @@
       color: white;
       flex: none;
       width: 100%;
+      font-size: 1rem; /* Keeps label legible */
     }
 
     .btn-recording {
@@ -90,6 +91,7 @@
       color: white;
       flex: none;
       width: 100%;
+      font-size: 1rem;
     }
 
     .btn-global {
@@ -100,6 +102,7 @@
     .btn-save {
       background-color: var(--success);
       color: white;
+      font-size: 1.25rem;
     }
 
     .toggle-container {
@@ -111,13 +114,13 @@
       border-radius: 8px;
       margin-top: 5px;
       font-weight: 600;
-      font-size: 0.95rem;
     }
 
     .toggle-label-group {
       display: flex;
       align-items: center;
       gap: 8px;
+      font-size: 1.25rem;
     }
 
     .switch {
@@ -245,14 +248,13 @@
     <section id="controls-sector">
       <button id="record-btn" class="btn-record">🔴 Record Track 1</button>
       <div class="button-group">
-        <button id="master-play-btn" class="btn-global" disabled>▶️ Play Mix</button>
-        <button id="reset-btn" class="btn-global" disabled>⏮️ Restart</button>
+        <button id="master-play-btn" class="btn-global" title="Play Mix" disabled>▶️</button>
+        <button id="reset-btn" class="btn-global" title="Stop & Rewind to Start" disabled>⏮️</button>
       </div>
       
       <div class="toggle-container">
         <div class="toggle-label-group">
           <span>🔁</span>
-          <span>Master Loop Repeat</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="loop-toggle" checked>
@@ -260,7 +262,7 @@
         </label>
       </div>
 
-      <button id="save-mix-btn" class="btn-save" disabled>Save Mix to File</button>
+      <button id="save-mix-btn" class="btn-save" title="Save Mix to File" disabled>💾</button>
     </section>
 
     <section class="mixer-board" id="mixer-board">
@@ -303,12 +305,11 @@
       }
     });
 
+    // Modified Behavioral Trigger: Stop instantly and clear playhead position pointers
     resetBtn.addEventListener('click', () => {
       initAudio();
+      stopAllTracks();
       resetAllPlayheads();
-      if (!isPlayingMix && tracks.length > 0) {
-        startAllTracks();
-      }
     });
 
     recordBtn.addEventListener('click', async () => {
@@ -470,7 +471,7 @@
 
       if (!options.monitoringOnly) {
         isPlayingMix = true;
-        masterPlayBtn.textContent = "⏸️ Pause Mix";
+        masterPlayBtn.textContent = "⏸️"; // Pure Pause iconography
       }
 
       clearInterval(masterLoopInterval);
@@ -484,7 +485,7 @@
         if (track.audioEl) track.audioEl.pause();
       });
       isPlayingMix = false;
-      masterPlayBtn.textContent = "▶️ Play Mix";
+      masterPlayBtn.textContent = "▶️"; // Pure Play iconography
     }
 
     function resetAllPlayheads() {
@@ -531,6 +532,13 @@
       resetBtn.disabled = noTracks;
       saveMixBtn.disabled = noTracks;
       
+      // Dynamic play toggle iconography maintenance block
+      if (!isPlayingMix) {
+        masterPlayBtn.textContent = "▶️";
+      } else {
+        masterPlayBtn.textContent = "⏸️";
+      }
+
       if (tracks.length >= maxTracks) {
         recordBtn.disabled = true;
         recordBtn.textContent = "🚫 Max Tracks Reached";
@@ -596,7 +604,7 @@
         alert("Failed to export the audio mix.");
       } finally {
         saveMixBtn.disabled = false;
-        saveMixBtn.textContent = "Save Mix to File";
+        saveMixBtn.textContent = "💾";
       }
     });
 
@@ -654,18 +662,3 @@
     }
 
     function writeString(view, offset, string) {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    }
-
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
-          .then(reg => console.log('Service Worker connected!'))
-          .catch(err => console.log('SW registration issue: ', err));
-      });
-    }
-  </script>
-</body>
-</html>
