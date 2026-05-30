@@ -344,12 +344,10 @@
             stopAllTracks();
             const blob = new Blob(recordedChunks, { type: 'audio/webm' });
             
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => {
-              const base64DataUrl = reader.result;
-              createTrackNode(blob, base64DataUrl);
-            };
+            // iOS Chrome Core Fix: Keep source generation strictly on the main synchronous timeline thread.
+            // Bypassing FileReader prevents Apple from clearing user gesture permissions on the audio engine.
+            const syncObjectURL = URL.createObjectURL(blob);
+            createTrackNode(blob, syncObjectURL);
             
             if (localStream) {
               localStream.getTracks().forEach(track => track.stop());
@@ -373,11 +371,10 @@
       }
     });
 
-    // FIX: Restored function signature parameters to handle both raw bytes and the base64 media stream properly
-    function createTrackNode(blob, base64DataUrl) {
+    function createTrackNode(blob, trackMediaSourceUrl) {
       const trackIndex = tracks.length;
       const audioEl = document.getElementById(`ios-audio-${trackIndex}`);
-      audioEl.src = base64DataUrl;
+      audioEl.src = trackMediaSourceUrl;
       audioEl.loop = false;
       audioEl.load();
 
@@ -454,7 +451,8 @@
       const index = tracks.findIndex(t => t.id === id);
       if (index !== -1) {
         tracks[index].audioEl.pause();
-        tracks[index].audioEl.src = ""; 
+        tracks[index].audioEl.removeAttribute('src'); // Clean memory pointers
+        tracks[index].audioEl.load();
         tracks.splice(index, 1);
       }
       renderMixerBoard();
