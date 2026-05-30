@@ -66,6 +66,10 @@
       font-size: 1rem;
       transition: opacity 0.2s;
       flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
 
     button:disabled {
@@ -98,7 +102,6 @@
       color: white;
     }
 
-    /* Loop Toggle Container styling */
     .toggle-container {
       display: flex;
       align-items: center;
@@ -156,7 +159,6 @@
       transform: translateX(24px);
     }
 
-    /* Mixer Board Layout */
     .mixer-board {
       display: flex;
       flex-direction: column;
@@ -225,15 +227,20 @@
 </head>
 <body>
 
+  <audio id="ios-audio-0" playsinline></audio>
+  <audio id="ios-audio-1" playsinline></audio>
+  <audio id="ios-audio-2" playsinline></audio>
+  <audio id="ios-audio-3" playsinline></audio>
+
   <main>
     <h1>Quick Multitrack</h1>
     <div class="subtitle">Record cumulative tracks via microphone</div>
 
     <section id="controls-sector">
-      <button id="record-btn" class="btn-record">Record Track 1</button>
+      <button id="record-btn" class="btn-record">🔴 Record Track 1</button>
       <div class="button-group">
-        <button id="master-play-btn" class="btn-global" disabled>Play Mix</button>
-        <button id="reset-btn" class="btn-global" disabled>Restart from 0</button>
+        <button id="master-play-btn" class="btn-global" disabled>▶️ Play Mix</button>
+        <button id="reset-btn" class="btn-global" disabled>⏮️ Restart</button>
       </div>
       
       <div class="toggle-container">
@@ -298,13 +305,12 @@
     recordBtn.addEventListener('click', async () => {
       initAudio();
       
-      if (tracks && tracks.length > 0) {
-        tracks.forEach(t => {
-          if (t.audioEl) {
-            t.audioEl.play().catch(() => {}); 
-            t.audioEl.pause();
-          }
-        });
+      for (let i = 0; i < maxTracks; i++) {
+        const aud = document.getElementById(`ios-audio-${i}`);
+        if (aud) {
+          aud.play().catch(() => {});
+          aud.pause();
+        }
       }
       
       if (!isRecording) {
@@ -336,322 +342,4 @@
             };
             
             if (localStream) {
-              localStream.getTracks().forEach(track => track.stop());
-            }
-            updateUI();
-          };
-
-          mediaRecorder.start();
-          isRecording = true;
-          recordBtn.textContent = "Stop Recording";
-          recordBtn.className = "btn-recording";
-        } catch (err) {
-          console.error('Microphone access denied:', err);
-          alert('Could not access microphone. Check site permissions.');
-        }
-      } else {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-          mediaRecorder.stop();
-        }
-        isRecording = false;
-      }
-    });
-
-    function createTrackNode(blob, base64DataUrl) {
-      const trackId = Date.now();
-      const audioEl = new Audio(base64DataUrl);
-      audioEl.loop = false;
-
-      const trackObject = {
-        id: trackId,
-        audioEl,
-        blob, 
-        currentPan: 0,
-        currentVolume: 1.0,
-        duration: 0
-      };
-
-      audioEl.addEventListener('loadedmetadata', () => {
-        trackObject.duration = audioEl.duration;
-      });
-
-      tracks.push(trackObject);
-      renderMixerBoard();
-    }
-
-    function renderMixerBoard() {
-      mixerBoard.innerHTML = '';
-      tracks.forEach((track, index) => {
-        const row = document.createElement('div');
-        row.className = 'track-row';
-        row.innerHTML = `
-          <div class="track-header">
-            <span class="track-title">Track ${index + 1}</span>
-            <button class="btn-delete" onclick="deleteTrack(${track.id})">Delete</button>
-          </div>
-          <div class="controls-container">
-            <div class="slider-container">
-              <div class="slider-label">
-                <span>Volume</span>
-                <span id="vol-txt-${track.id}">${Math.round(track.currentVolume * 100)}%</span>
-              </div>
-              <input type="range" min="0" max="1.5" step="0.05" value="${track.currentVolume}" 
-                oninput="updateVolume(${track.id}, this.value)">
-            </div>
-            <div class="slider-container">
-              <div class="slider-label">
-                <span>Left</span>
-                <span>Stereo Pan</span>
-                <span>Right</span>
-              </div>
-              <input type="range" min="-1" max="1" step="0.1" value="${track.currentPan}" 
-                oninput="updatePan(${track.id}, this.value)">
-            </div>
-          </div>
-        `;
-        mixerBoard.appendChild(row);
-      });
-      updateUI();
-    }
-
-    function updateVolume(id, val) {
-      const track = tracks.find(t => t.id === id);
-      if (track) {
-        track.currentVolume = parseFloat(val);
-        track.audioEl.volume = Math.min(1.0, track.currentVolume);
-        document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
-      }
-    }
-
-    function updatePan(id, val) {
-      const track = tracks.find(t => t.id === id);
-      if (track) {
-        track.currentPan = parseFloat(val);
-      }
-    }
-
-    function deleteTrack(id) {
-      stopAllTracks();
-      const index = tracks.findIndex(t => t.id === id);
-      if (index !== -1) {
-        tracks[index].audioEl.pause();
-        tracks.splice(index, 1);
-      }
-      renderMixerBoard();
-    }
-
-    function startAllTracks(options = {}) {
-      if (!tracks || tracks.length === 0) return;
-      
-      if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-
-      tracks.forEach(track => {
-        if (track.audioEl) {
-          track.audioEl.play().catch(e => console.log("Playback delay: ", e));
-        }
-      });
-
-      if (!options.monitoringOnly) {
-        isPlayingMix = true;
-        masterPlayBtn.textContent = "Pause Mix";
-      }
-
-      clearInterval(masterLoopInterval);
-      masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
-    }
-
-    function stopAllTracks() {
-      clearInterval(masterLoopInterval);
-      if (!tracks || tracks.length === 0) return;
-      tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.pause();
-      });
-      isPlayingMix = false;
-      masterPlayBtn.textContent = "Play Mix";
-    }
-
-    function resetAllPlayheads() {
-      if (!tracks || tracks.length === 0) return;
-      tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.currentTime = 0;
-      });
-    }
-
-    function checkMasterLoopTimeline() {
-      if (!tracks || tracks.length === 0) return;
-
-      const activeLengths = tracks.map(t => t.duration || t.audioEl.duration || 0);
-      const maxDuration = Math.max(...activeLengths);
-
-      if (maxDuration === 0) return;
-
-      const masterTrack = tracks.find(t => (t.duration || t.audioEl.duration) === maxDuration);
-      
-      if (masterTrack && masterTrack.audioEl) {
-        if (masterTrack.audioEl.ended || masterTrack.audioEl.currentTime >= maxDuration - 0.02) {
-          
-          // Checked State Evaluation: If loop is un-checked, cleanly halt playback instead of repeating
-          if (!loopToggle.checked) {
-            stopAllTracks();
-            resetAllPlayheads();
-            return;
-          }
-
-          resetAllPlayheads();
-          tracks.forEach(track => {
-            if (track.audioEl) {
-              track.audioEl.play().catch(() => {});
-            }
-          });
-        }
-      }
-    }
-
-    function updateUI() {
-      const noTracks = !tracks || tracks.length === 0;
-      masterPlayBtn.disabled = noTracks;
-      resetBtn.disabled = noTracks;
-      saveMixBtn.disabled = noTracks;
-      
-      if (tracks.length >= maxTracks) {
-        recordBtn.disabled = true;
-        recordBtn.textContent = "Max 4 Tracks Reached";
-        recordBtn.className = "btn-record";
-      } else {
-        recordBtn.disabled = false;
-        recordBtn.textContent = `Record Track ${tracks.length + 1}`;
-        recordBtn.className = "btn-record";
-      }
-    }
-
-    // --- Offline Rendering & WAV Export Engine ---
-    saveMixBtn.addEventListener('click', async () => {
-      if (!tracks || tracks.length === 0) return;
-      initAudio();
-      saveMixBtn.disabled = true;
-      saveMixBtn.textContent = "Rendering Mix...";
-
-      try {
-        const decodePromises = tracks.map(async (track) => {
-          const arrayBuffer = await track.blob.arrayBuffer();
-          const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const buffer = await tempCtx.decodeAudioData(arrayBuffer);
-          tempCtx.close();
-          return buffer;
-        });
-
-        const audioBuffers = await Promise.all(decodePromises);
-        const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
-        const sampleRate = audioCtx.sampleRate;
-        const offlineCtx = new OfflineAudioContext(2, sampleRate * maxDuration, sampleRate);
-
-        tracks.forEach((track, index) => {
-          const bufferSource = offlineCtx.createBufferSource();
-          bufferSource.buffer = audioBuffers[index];
-
-          const offlineGain = offlineCtx.createGain();
-          offlineGain.gain.value = track.currentVolume;
-
-          const offlinePanner = offlineCtx.createStereoPanner();
-          offlinePanner.pan.value = track.currentPan;
-
-          bufferSource.connect(offlineGain);
-          offlineGain.connect(offlinePanner);
-          offlinePanner.connect(offlineCtx.destination);
-
-          bufferSource.start(0);
-        });
-
-        const renderedBuffer = await offlineCtx.startRendering();
-        const wavBlob = audioBufferToWav(renderedBuffer);
-        const downloadUrl = URL.createObjectURL(wavBlob);
-        
-        const anchor = document.createElement('a');
-        anchor.href = downloadUrl;
-        anchor.download = `4track-mix-${Date.now()}.wav`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(downloadUrl);
-
-      } catch (err) {
-        console.error("Export failure:", err);
-        alert("Failed to export the audio mix.");
-      } finally {
-        saveMixBtn.disabled = false;
-        saveMixBtn.textContent = "Save Mix to File";
-      }
-    });
-
-    // WAV Encoder
-    function audioBufferToWav(buffer) {
-      const numOfChan = buffer.numberOfChannels;
-      const sampleRate = buffer.sampleRate;
-      const format = 1; 
-      const bitDepth = 16;
-      
-      let result;
-      if (numOfChan === 2) {
-        result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
-      } else {
-        result = buffer.getChannelData(0);
-      }
-      
-      const bufferArr = new ArrayBuffer(44 + result.length * 2);
-      const view = new DataView(bufferArr);
-      
-      writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + result.length * 2, true);
-      writeString(view, 8, 'WAVE');
-      writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, format, true);
-      view.setUint16(22, numOfChan, true);
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
-      view.setUint16(32, numOfChan * (bitDepth / 8), true);
-      view.setUint16(34, bitDepth, true);
-      writeString(view, 36, 'data');
-      view.setUint32(40, result.length * 2, true);
-      
-      let offset = 44;
-      for (let i = 0; i < result.length; i++, offset += 2) {
-        let s = Math.max(-1, Math.min(1, result[i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-      }
-      
-      return new Blob([view], { type: 'audio/wav' });
-    }
-
-    function interleave(inputL, inputR) {
-      const length = inputL.length + inputR.length;
-      const result = new Float32Array(length);
-      let index = 0;
-      let inputIndex = 0;
-      
-      while (index < length) {
-        result[index++] = inputL[inputIndex];
-        result[index++] = inputR[inputIndex];
-        inputIndex++;
-      }
-      return result;
-    }
-
-    function writeString(view, offset, string) {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    }
-
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
-          .then(reg => console.log('Service Worker connected!'))
-          .catch(err => console.log('SW registration issue: ', err));
-      });
-    }
-  </script>
-</body>
-</html>
+              localStream.get
