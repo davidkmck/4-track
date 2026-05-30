@@ -257,10 +257,18 @@
             if (e.data.size > 0) recordedChunks.push(e.data);
           };
 
-          mediaRecorder.onstop = () => {
+           mediaRecorder.onstop = () => {
             stopAllTracks();
             const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-            createTrackNode(blob);
+            
+            // iOS Ultimate Fix: Convert the raw blob into an inline Base64 Data URL
+            // This forces mobile Safari to treat the audio as safe native data.
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = () => {
+              const base64DataUrl = reader.result;
+              createTrackNode(blob, base64DataUrl);
+            };
             
             if (localStream) {
               localStream.getTracks().forEach(track => track.stop());
@@ -284,24 +292,21 @@
       }
     });
 
-    function createTrackNode(blob) {
+    function createTrackNode(blob, base64DataUrl) {
       const trackId = Date.now();
-      const audioUrl = URL.createObjectURL(blob);
-      const audioEl = new Audio(audioUrl);
-      
-      // CRITICAL FIX: Disable independent native looping so short tracks don't go out of sync
+      // Use the Base64 Data URL for live playback to bypass Safari's blob block
+      const audioEl = new Audio(base64DataUrl);
       audioEl.loop = false;
 
       const trackObject = {
         id: trackId,
         audioEl,
-        blob,
+        blob, // Keep the original raw blob safe here so the Save Mix WAV engine still works!
         currentPan: 0,
         currentVolume: 1.0,
         duration: 0
       };
 
-      // Get metadata to store precision duration lengths for loop tracking calculations
       audioEl.addEventListener('loadedmetadata', () => {
         trackObject.duration = audioEl.duration;
       });
@@ -309,6 +314,7 @@
       tracks.push(trackObject);
       renderMixerBoard();
     }
+    
 
     function renderMixerBoard() {
       mixerBoard.innerHTML = '';
