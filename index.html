@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Quick Multitrack</title>
-<link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./manifest.json">
   <style>
     :root {
       --bg-color: #0f172a;
@@ -191,6 +191,7 @@
     let isRecording = false;
     let isPlayingMix = false;
     let localStream = null;
+    let masterLoopInterval = null; // High-frequency loop timing engine ticker
     const maxTracks = 4;
     const tracks = [];
 
@@ -220,38 +221,32 @@
 
     resetBtn.addEventListener('click', () => {
       initAudio();
-      if (tracks && tracks.length > 0) {
-        tracks.forEach(track => {
-          if (track.audioEl) track.audioEl.currentTime = 0;
-        });
-      }
+      resetAllPlayheads();
       if (!isPlayingMix && tracks.length > 0) {
         startAllTracks();
       }
     });
 
-recordBtn.addEventListener('click', async () => {
+    recordBtn.addEventListener('click', async () => {
       initAudio();
       
-      // iOS Essential: "Pre-warm" and unlock all existing audio tracks on the direct tap event
+      // iOS Essential: "Pre-warm" and unlock all existing audio tracks on user gesture
       if (tracks && tracks.length > 0) {
         tracks.forEach(t => {
           if (t.audioEl) {
-            t.audioEl.play(); 
-            t.audioEl.pause(); // Instantly pause, but iOS now marks them as "user approved"
+            t.audioEl.play().catch(() => {}); 
+            t.audioEl.pause();
           }
         });
       }
+      
       if (!isRecording) {
         if (tracks.length >= maxTracks) return;
         try {
           recordedChunks = [];
           
-          // Fixed safety check: Only reset loop timestamps if tracks actually exist yet
           if (tracks && tracks.length > 0) {
-            tracks.forEach(t => {
-              if (t.audioEl) t.audioEl.currentTime = 0;
-            });
+            resetAllPlayheads();
             startAllTracks({ monitoringOnly: true });
           }
 
@@ -288,22 +283,28 @@ recordBtn.addEventListener('click', async () => {
         isRecording = false;
       }
     });
-function createTrackNode(blob) {
+
+    function createTrackNode(blob) {
       const trackId = Date.now();
       const audioUrl = URL.createObjectURL(blob);
       const audioEl = new Audio(audioUrl);
-      audioEl.loop = true;
+      
+      // CRITICAL FIX: Disable independent native looping so short tracks don't go out of sync
+      audioEl.loop = false;
 
-      // iOS Safari Compatibility: Do not connect MediaElementSource to live destination.
-      // Instead, we will let the Audio element play directly to the device hardware,
-      // which Safari fully permits after our pre-warming click.
       const trackObject = {
         id: trackId,
         audioEl,
         blob,
         currentPan: 0,
-        currentVolume: 1.0
+        currentVolume: 1.0,
+        duration: 0
       };
+
+      // Get metadata to store precision duration lengths for loop tracking calculations
+      audioEl.addEventListener('loadedmetadata', () => {
+        trackObject.duration = audioEl.duration;
+      });
 
       tracks.push(trackObject);
       renderMixerBoard();
@@ -348,22 +349,18 @@ function createTrackNode(blob) {
       const track = tracks.find(t => t.id === id);
       if (track) {
         track.currentVolume = parseFloat(val);
-        // Change the native HTML element volume directly so Safari honors it
-        // Note: HTML audio volume maxes out at 1.0 natively
         track.audioEl.volume = Math.min(1.0, track.currentVolume);
         document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
       }
     }
 
+    // Panning applied upon downmix file generation export
     function updatePan(id, val) {
       const track = tracks.find(t => t.id === id);
       if (track) {
         track.currentPan = parseFloat(val);
-        // Live panning will be applied to the downmixed exported file, 
-        // as HTML5 <audio> tags do not support native mono-to-stereo panning without the Web Audio graph.
       }
     }
-    
 
     function deleteTrack(id) {
       stopAllTracks();
@@ -374,36 +371,72 @@ function createTrackNode(blob) {
       }
       renderMixerBoard();
     }
-// Update this function to handle strict iOS audio playback permissions
+
     function startAllTracks(options = {}) {
       if (!tracks || tracks.length === 0) return;
+      
+      // Force resume running state if browser backgrounded it
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
       tracks.forEach(track => {
         if (track.audioEl) {
-          // iOS Trick: Force-resume the audio context state if Apple suspended it
-          if (audioCtx && audioCtx.state === 'suspended') {
-            audioCtx.resume();
-          }
-          track.audioEl.play().catch(e => {
-            console.log("Playback delayed or blocked by iOS: ", e);
-            // Fallback: Attempt a direct hardware play invocation if context choked
-            track.audioEl.muted = false;
-            track.audioEl.play();
-          });
+          track.audioEl.play().catch(e => console.log("Playback delay: ", e));
         }
       });
+
       if (!options.monitoringOnly) {
         isPlayingMix = true;
         masterPlayBtn.textContent = "Pause Mix";
       }
+
+      // Start the Master Sync Watcher Engine loop monitoring routine
+      clearInterval(masterLoopInterval);
+      masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
     }
 
     function stopAllTracks() {
+      clearInterval(masterLoopInterval);
       if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
         if (track.audioEl) track.audioEl.pause();
       });
       isPlayingMix = false;
       masterPlayBtn.textContent = "Play Mix";
+    }
+
+    function resetAllPlayheads() {
+      if (!tracks || tracks.length === 0) return;
+      tracks.forEach(track => {
+        if (track.audioEl) track.audioEl.currentTime = 0;
+      });
+    }
+
+    // Unified Looping Coordinator logic
+    function checkMasterLoopTimeline() {
+      if (!tracks || tracks.length === 0) return;
+
+      // Find the track with the longest recorded hardware layout path
+      const activeLengths = tracks.map(t => t.duration || t.audioEl.duration || 0);
+      const maxDuration = Math.max(...activeLengths);
+
+      if (maxDuration === 0) return;
+
+      // Locate the master audio track element running the timeline
+      const masterTrack = tracks.find(t => (t.duration || t.audioEl.duration) === maxDuration);
+      
+      if (masterTrack && masterTrack.audioEl) {
+        // When the master track hits the finish line (or near-end loop boundaries)
+        if (masterTrack.audioEl.ended || masterTrack.audioEl.currentTime >= maxDuration - 0.02) {
+          resetAllPlayheads();
+          tracks.forEach(track => {
+            if (track.audioEl) {
+              track.audioEl.play().catch(() => {});
+            }
+          });
+        }
+      }
     }
 
     function updateUI() {
@@ -541,7 +574,6 @@ function createTrackNode(blob) {
       }
     }
 
-    // Service Worker relative registration link setup
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
