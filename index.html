@@ -314,9 +314,32 @@
     recordBtn.addEventListener('click', async () => {
       initAudio();
       
-      // Safety fix: "Pre-warm" only the audio elements we have captured so far, 
-      // preventing uninitialized DOM nodes from locking up the execution loop.
-      const tracksToWarm = Math.max(1, tracks.length);
-      for (let i = 0; i < tracksToWarm; i++) {
-        const aud = document.getElementById(`ios-audio-${i}`);
-        if (aud) {
+      // Keep only existing tracks warmed up to keep mobile engines responsive
+      if (tracks && tracks.length > 0) {
+        tracks.forEach(t => {
+          if (t.audioEl) {
+            t.audioEl.play().catch(() => {});
+            t.audioEl.pause();
+          }
+        });
+      }
+      
+      if (!isRecording) {
+        if (tracks.length >= maxTracks) return;
+        try {
+          recordedChunks = [];
+          
+          if (tracks && tracks.length > 0) {
+            resetAllPlayheads();
+            startAllTracks({ monitoringOnly: true });
+          }
+
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+          mediaRecorder = new MediaRecorder(localStream);
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            stopAll
