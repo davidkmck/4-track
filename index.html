@@ -229,59 +229,72 @@
     });
 
     recordBtn.addEventListener('click', async () => {
-      // 1. Initialize audio framework context cleanly first
-      initAudio();
+  // 1. Instantly wake up the AudioContext on the exact microsecond of the user tap
+  initAudio();
+  
+  if (!isRecording) {
+    if (tracks.length >= maxTracks) return;
+    
+    // Check if the browser even supports media devices in this context
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("Your browser is blocking microphone access in this view. Try opening this page in a normal browser tab instead of the installed app shortcut.");
+      return;
+    }
+
+    try {
+      // 2. Request the stream channel explicitly
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        } 
+      });
       
-      if (!isRecording) {
-        if (tracks.length >= maxTracks) return;
-        try {
-          // 2. Request microphone stream access channel explicit loop
-          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          recordedChunks = [];
-          
-          // 3. Set existing playheads back to baseline alignment
-          tracks.forEach(t => {
-            t.audioEl.currentTime = 0;
-          });
-          
-          // 4. Spin up backing tracks if they exist
-          if (tracks.length > 0) {
-            startAllTracks({ monitoringOnly: true });
-          }
-
-          // 5. Build and fire standard safe recording pipeline
-          mediaRecorder = new MediaRecorder(localStream);
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) recordedChunks.push(e.data);
-          };
-
-          mediaRecorder.onstop = () => {
-            stopAllTracks();
-            const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-            createTrackNode(blob);
-            
-            // Clean up microphone hardware connection instantly
-            if (localStream) {
-              localStream.getTracks().forEach(track => track.stop());
-            }
-            updateUI();
-          };
-
-          mediaRecorder.start();
-          isRecording = true;
-          recordBtn.textContent = "Stop Recording";
-          recordBtn.className = "btn-recording";
-        } catch (err) {
-          console.error('Microphone access denied:', err);
-          alert('Could not access microphone. Check site permissions.');
-        }
-      } else {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-          mediaRecorder.stop();
-        }
-        isRecording = false;
+      localStream = stream;
+      recordedChunks = [];
+      
+      // 3. Snap playheads to baseline
+      tracks.forEach(t => {
+        t.audioEl.currentTime = 0;
+      });
+      
+      if (tracks.length > 0) {
+        startAllTracks({ monitoringOnly: true });
       }
-    });
+
+      mediaRecorder = new MediaRecorder(localStream);
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        stopAllTracks();
+        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+        createTrackNode(blob);
+        
+        if (localStream) {
+          localStream.getTracks().forEach(track => track.stop());
+        }
+        updateUI();
+      };
+
+      mediaRecorder.start();
+      isRecording = true;
+      recordBtn.textContent = "Stop Recording";
+      recordBtn.className = "btn-recording";
+    } catch (err) {
+      console.error('Microphone hardware error:', err);
+      alert(`Microphone error: ${err.name}. Please check your phone settings.`);
+    }
+  } else {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+    }
+    isRecording = false;
+  }
+});
+
 
     function createTrackNode(blob) {
       const trackId = Date.now();
