@@ -58,18 +58,14 @@
     }
 
     button {
-      padding: 12px 20px;
       border: none;
       border-radius: 8px;
       font-weight: 600;
       cursor: pointer;
-      font-size: 1.25rem; /* Enhanced visibility for pure iconography */
       transition: opacity 0.2s;
-      flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
     }
 
     button:disabled {
@@ -77,12 +73,14 @@
       cursor: not-allowed;
     }
 
+    /* Fixed Text Label Button Tracking Layout */
     .btn-record {
       background-color: var(--accent);
       color: white;
       flex: none;
       width: 100%;
-      font-size: 1rem; /* Keeps label legible */
+      padding: 12px 20px;
+      font-size: 1rem;
     }
 
     .btn-recording {
@@ -91,18 +89,28 @@
       color: white;
       flex: none;
       width: 100%;
+      padding: 12px 20px;
       font-size: 1rem;
     }
 
+    /* FIX: Maximized layout specs optimized for pure icon buttons */
     .btn-global {
       background-color: #475569;
       color: white;
+      flex: 1;
+      padding: 6px 0;      /* Reduced padding to maximize icon footprint boundary limits */
+      font-size: 1.85rem;  /* Massive icon expansion scale boost */
+      line-height: 1;
     }
 
+    /* FIX: Maximized layout specs optimized for file bounce downmix action icon */
     .btn-save {
       background-color: var(--success);
       color: white;
-      font-size: 1.25rem;
+      width: 100%;
+      padding: 8px 0;
+      font-size: 1.85rem;
+      line-height: 1;
     }
 
     .toggle-container {
@@ -120,7 +128,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 1.25rem;
+      font-size: 1.5rem; /* Made the master loop 🔁 switch icon bigger too */
     }
 
     .switch {
@@ -305,7 +313,6 @@
       }
     });
 
-    // Modified Behavioral Trigger: Stop instantly and clear playhead position pointers
     resetBtn.addEventListener('click', () => {
       initAudio();
       stopAllTracks();
@@ -325,340 +332,3 @@
       }
       
       if (!isRecording) {
-        if (tracks.length >= maxTracks) return;
-        try {
-          recordedChunks = [];
-          
-          if (tracks && tracks.length > 0) {
-            resetAllPlayheads();
-            startAllTracks({ monitoringOnly: true });
-          }
-
-          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-          mediaRecorder = new MediaRecorder(localStream);
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) recordedChunks.push(e.data);
-          };
-
-          mediaRecorder.onstop = () => {
-            stopAllTracks();
-            const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-            
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => {
-              const base64DataUrl = reader.result;
-              createTrackNode(blob, base64DataUrl);
-            };
-            
-            if (localStream) {
-              localStream.getTracks().forEach(track => track.stop());
-            }
-            updateUI();
-          };
-
-          mediaRecorder.start();
-          isRecording = true;
-          recordBtn.textContent = "⏹️ Stop Recording";
-          recordBtn.className = "btn-recording";
-        } catch (err) {
-          console.error('Microphone access denied:', err);
-          alert('Could not access microphone. Check site permissions.');
-        }
-      } else {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-          mediaRecorder.stop();
-        }
-        isRecording = false;
-      }
-    });
-
-    function createTrackNode(blob, base64DataUrl) {
-      const trackIndex = tracks.length;
-      const audioEl = document.getElementById(`ios-audio-${trackIndex}`);
-      audioEl.src = base64DataUrl;
-      audioEl.loop = false;
-      audioEl.load();
-
-      const trackObject = {
-        id: Date.now(),
-        audioEl,
-        blob, 
-        currentPan: 0,
-        currentVolume: 1.0,
-        duration: 0
-      };
-
-      audioEl.addEventListener('loadedmetadata', () => {
-        trackObject.duration = audioEl.duration || 0;
-      });
-
-      tracks.push(trackObject);
-      renderMixerBoard();
-    }
-
-    function renderMixerBoard() {
-      mixerBoard.innerHTML = '';
-      tracks.forEach((track, index) => {
-        const row = document.createElement('div');
-        row.className = 'track-row';
-        row.innerHTML = `
-          <div class="track-header">
-            <span class="track-title">Track ${index + 1}</span>
-            <button class="btn-delete" onclick="deleteTrack(${track.id})">Delete</button>
-          </div>
-          <div class="controls-container">
-            <div class="slider-container">
-              <div class="slider-label">
-                <span>Volume</span>
-                <span id="vol-txt-${track.id}">${Math.round(track.currentVolume * 100)}%</span>
-              </div>
-              <input type="range" min="0" max="1.5" step="0.05" value="${track.currentVolume}" 
-                oninput="updateVolume(${track.id}, this.value)">
-            </div>
-            <div class="slider-container">
-              <div class="slider-label">
-                <span>Left</span>
-                <span>Stereo Pan</span>
-                <span>Right</span>
-              </div>
-              <input type="range" min="-1" max="1" step="0.1" value="${track.currentPan}" 
-                oninput="updatePan(${track.id}, this.value)">
-            </div>
-          </div>
-        `;
-        mixerBoard.appendChild(row);
-      });
-      updateUI();
-    }
-
-    function updateVolume(id, val) {
-      const track = tracks.find(t => t.id === id);
-      if (track) {
-        track.currentVolume = parseFloat(val);
-        track.audioEl.volume = Math.min(1.0, track.currentVolume);
-        document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
-      }
-    }
-
-    function updatePan(id, val) {
-      const track = tracks.find(t => t.id === id);
-      if (track) {
-        track.currentPan = parseFloat(val);
-      }
-    }
-
-    function deleteTrack(id) {
-      stopAllTracks();
-      const index = tracks.findIndex(t => t.id === id);
-      if (index !== -1) {
-        tracks[index].audioEl.pause();
-        tracks[index].audioEl.src = ""; 
-        tracks.splice(index, 1);
-      }
-      renderMixerBoard();
-    }
-
-    function startAllTracks(options = {}) {
-      if (!tracks || tracks.length === 0) return;
-      
-      tracks.forEach(track => {
-        if (track.audioEl) {
-          track.audioEl.play().catch(e => console.log("Playback delay: ", e));
-        }
-      });
-
-      if (!options.monitoringOnly) {
-        isPlayingMix = true;
-        masterPlayBtn.textContent = "⏸️"; // Pure Pause iconography
-      }
-
-      clearInterval(masterLoopInterval);
-      masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
-    }
-
-    function stopAllTracks() {
-      clearInterval(masterLoopInterval);
-      if (!tracks || tracks.length === 0) return;
-      tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.pause();
-      });
-      isPlayingMix = false;
-      masterPlayBtn.textContent = "▶️"; // Pure Play iconography
-    }
-
-    function resetAllPlayheads() {
-      if (!tracks || tracks.length === 0) return;
-      tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.currentTime = 0;
-      });
-    }
-
-    function checkMasterLoopTimeline() {
-      if (!tracks || tracks.length === 0) return;
-
-      const activeLengths = tracks.map(t => t.duration || t.audioEl.duration || 0).filter(d => !isNaN(d));
-      if (activeLengths.length === 0) return;
-
-      const maxDuration = Math.max(...activeLengths);
-      if (maxDuration === 0) return;
-
-      const masterTrack = tracks.find(t => {
-        const d = t.duration || t.audioEl.duration || 0;
-        return d === maxDuration;
-      });
-      
-      if (masterTrack && masterTrack.audioEl) {
-        if (masterTrack.audioEl.ended || masterTrack.audioEl.currentTime >= maxDuration - 0.02) {
-          if (!loopToggle.checked) {
-            stopAllTracks();
-            resetAllPlayheads();
-            return;
-          }
-          resetAllPlayheads();
-          tracks.forEach(track => {
-            if (track.audioEl) {
-              track.audioEl.play().catch(() => {});
-            }
-          });
-        }
-      }
-    }
-
-    function updateUI() {
-      const noTracks = !tracks || tracks.length === 0;
-      masterPlayBtn.disabled = noTracks;
-      resetBtn.disabled = noTracks;
-      saveMixBtn.disabled = noTracks;
-      
-      // Dynamic play toggle iconography maintenance block
-      if (!isPlayingMix) {
-        masterPlayBtn.textContent = "▶️";
-      } else {
-        masterPlayBtn.textContent = "⏸️";
-      }
-
-      if (tracks.length >= maxTracks) {
-        recordBtn.disabled = true;
-        recordBtn.textContent = "🚫 Max Tracks Reached";
-        recordBtn.className = "btn-record";
-      } else {
-        recordBtn.disabled = false;
-        recordBtn.textContent = `🔴 Record Track ${tracks.length + 1}`;
-        recordBtn.className = "btn-record";
-      }
-    }
-
-    saveMixBtn.addEventListener('click', async () => {
-      if (!tracks || tracks.length === 0) return;
-      initAudio();
-      saveMixBtn.disabled = true;
-      saveMixBtn.textContent = "Rendering Mix...";
-
-      try {
-        const decodePromises = tracks.map(async (track) => {
-          const arrayBuffer = await track.blob.arrayBuffer();
-          const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const buffer = await tempCtx.decodeAudioData(arrayBuffer);
-          tempCtx.close();
-          return buffer;
-        });
-
-        const audioBuffers = await Promise.all(decodePromises);
-        const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
-        const sampleRate = audioCtx.sampleRate;
-        const offlineCtx = new OfflineAudioContext(2, sampleRate * maxDuration, sampleRate);
-
-        tracks.forEach((track, index) => {
-          const bufferSource = offlineCtx.createBufferSource();
-          bufferSource.buffer = audioBuffers[index];
-
-          const offlineGain = offlineCtx.createGain();
-          offlineGain.gain.value = track.currentVolume;
-
-          const offlinePanner = offlineCtx.createStereoPanner();
-          offlinePanner.pan.value = track.currentPan;
-
-          bufferSource.connect(offlineGain);
-          offlineGain.connect(offlinePanner);
-          offlinePanner.connect(offlineCtx.destination);
-
-          bufferSource.start(0);
-        });
-
-        const renderedBuffer = await offlineCtx.startRendering();
-        const wavBlob = audioBufferToWav(renderedBuffer);
-        const downloadUrl = URL.createObjectURL(wavBlob);
-        
-        const anchor = document.createElement('a');
-        anchor.href = downloadUrl;
-        anchor.download = `4track-mix-${Date.now()}.wav`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(downloadUrl);
-
-      } catch (err) {
-        console.error("Export failure:", err);
-        alert("Failed to export the audio mix.");
-      } finally {
-        saveMixBtn.disabled = false;
-        saveMixBtn.textContent = "💾";
-      }
-    });
-
-    function audioBufferToWav(buffer) {
-      const numOfChan = buffer.numberOfChannels;
-      const sampleRate = buffer.sampleRate;
-      const format = 1; 
-      const bitDepth = 16;
-      
-      let result;
-      if (numOfChan === 2) {
-        result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
-      } else {
-        result = buffer.getChannelData(0);
-      }
-      
-      const bufferArr = new ArrayBuffer(44 + result.length * 2);
-      const view = new DataView(bufferArr);
-      
-      writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + result.length * 2, true);
-      writeString(view, 8, 'WAVE');
-      writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, format, true);
-      view.setUint16(22, numOfChan, true);
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
-      view.setUint16(32, numOfChan * (bitDepth / 8), true);
-      view.setUint16(34, bitDepth, true);
-      writeString(view, 36, 'data');
-      view.setUint32(40, result.length * 2, true);
-      
-      let offset = 44;
-      for (let i = 0; i < result.length; i++, offset += 2) {
-        let s = Math.max(-1, Math.min(1, result[i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-      }
-      
-      return new Blob([view], { type: 'audio/wav' });
-    }
-
-    function interleave(inputL, inputR) {
-      const length = inputL.length + inputR.length;
-      const result = new Float32Array(length);
-      let index = 0;
-      let inputIndex = 0;
-      
-      while (index < length) {
-        result[index++] = inputL[inputIndex];
-        result[index++] = inputR[inputIndex];
-        inputIndex++;
-      }
-      return result;
-    }
-
-    function writeString(view, offset, string) {
