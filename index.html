@@ -253,33 +253,21 @@
   <audio id="ios-audio-2" playsinline></audio>
   <audio id="ios-audio-3" playsinline></audio>
 
-  <main>
+<main>
     <h1>Quick Multitrack</h1>
-    <div class="subtitle">Record cumulative tracks via microphone</div>
-
     <section id="controls-sector">
       <button id="record-btn" class="btn-record">🔴 Record Track 1</button>
       <div class="button-group">
-        <button id="master-play-btn" class="btn-global" disabled>▶️ Play Mix</button>
-        <button id="reset-btn" class="btn-global" disabled>⏮️ Restart</button>
+        <button id="master-play-btn" class="btn-global" disabled>▶️</button>
+        <button id="reset-btn" class="btn-global" disabled>⏮️</button>
       </div>
-      
       <div class="toggle-container">
-        <div class="toggle-label-group">
-          <span>🔁</span>
-          <span>Master Loop Repeat</span>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="loop-toggle" checked>
-          <span class="slider-toggle"></span>
-        </label>
+        <span>🔁 Master Loop</span>
+        <input type="checkbox" id="loop-toggle" checked>
       </div>
-
-      <button id="save-mix-btn" class="btn-save" disabled>💾 Save Mix to File</button>
+      <button id="save-mix-btn" class="btn-save" disabled>💾</button>
     </section>
-
-    <section class="mixer-board" id="mixer-board">
-      </section>
+    <section class="mixer-board" id="mixer-board"></section>
   </main>
 
   <script>
