@@ -226,6 +226,12 @@
       accent-color: var(--accent);
     }
 
+    /* Style rule specific to the read-only position playhead slider */
+    input[type="range"].progress-slider {
+      accent-color: var(--success);
+      cursor: default;
+    }
+
     @keyframes pulse {
       0% { opacity: 1; }
       50% { opacity: 0.6; }
@@ -344,8 +350,6 @@
             stopAllTracks();
             const blob = new Blob(recordedChunks, { type: 'audio/webm' });
             
-            // iOS Chrome Core Fix: Keep source generation strictly on the main synchronous timeline thread.
-            // Bypassing FileReader prevents Apple from clearing user gesture permissions on the audio engine.
             const syncObjectURL = URL.createObjectURL(blob);
             createTrackNode(blob, syncObjectURL);
             
@@ -387,8 +391,20 @@
         duration: 0
       };
 
+      // Handle metadata resolution to instantly update total times on screen
       audioEl.addEventListener('loadedmetadata', () => {
         trackObject.duration = audioEl.duration || 0;
+        renderMixerBoard(); // Re-render card layout once total duration values populate
+      });
+
+      // Continuous runtime tracking hook to update the progress slider live
+      audioEl.addEventListener('timeupdate', () => {
+        const progSlider = document.getElementById(`progress-${trackObject.id}`);
+        const currentText = document.getElementById(`current-time-${trackObject.id}`);
+        if (progSlider && currentText) {
+          progSlider.value = audioEl.currentTime;
+          currentText.textContent = audioEl.currentTime.toFixed(1) + 's';
+        }
       });
 
       tracks.push(trackObject);
@@ -398,6 +414,7 @@
     function renderMixerBoard() {
       mixerBoard.innerHTML = '';
       tracks.forEach((track, index) => {
+        const totalDurationText = track.duration ? track.duration.toFixed(1) + 's' : '0.0s';
         const row = document.createElement('div');
         row.className = 'track-row';
         row.innerHTML = `
@@ -406,6 +423,16 @@
             <button class="btn-delete" onclick="deleteTrack(${track.id})">Delete</button>
           </div>
           <div class="controls-container">
+            <div class="slider-container">
+              <div class="slider-label">
+                <span>Playback Position</span>
+                <div>
+                  <span id="current-time-${track.id}">0.0s</span> / <span>${totalDurationText}</span>
+                </div>
+              </div>
+              <input type="range" class="progress-slider" id="progress-${track.id}" min="0" max="${track.duration || 0}" step="0.05" value="0" disabled>
+            </div>
+            
             <div class="slider-container">
               <div class="slider-label">
                 <span>Volume</span>
@@ -451,7 +478,7 @@
       const index = tracks.findIndex(t => t.id === id);
       if (index !== -1) {
         tracks[index].audioEl.pause();
-        tracks[index].audioEl.removeAttribute('src'); // Clean memory pointers
+        tracks[index].audioEl.removeAttribute('src'); 
         tracks[index].audioEl.load();
         tracks.splice(index, 1);
       }
@@ -489,7 +516,14 @@
     function resetAllPlayheads() {
       if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.currentTime = 0;
+        if (track.audioEl) {
+          track.audioEl.currentTime = 0;
+          // Immediately sync the UI element to 0 on reset
+          const progSlider = document.getElementById(`progress-${track.id}`);
+          const currentText = document.getElementById(`current-time-${track.id}`);
+          if (progSlider) progSlider.value = 0;
+          if (currentText) currentText.textContent = '0.0s';
+        }
       });
     }
 
