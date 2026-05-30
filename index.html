@@ -230,9 +230,18 @@
       }
     });
 
-    recordBtn.addEventListener('click', async () => {
+recordBtn.addEventListener('click', async () => {
       initAudio();
       
+      // iOS Essential: "Pre-warm" and unlock all existing audio tracks on the direct tap event
+      if (tracks && tracks.length > 0) {
+        tracks.forEach(t => {
+          if (t.audioEl) {
+            t.audioEl.play(); 
+            t.audioEl.pause(); // Instantly pause, but iOS now marks them as "user approved"
+          }
+        });
+      }
       if (!isRecording) {
         if (tracks.length >= maxTracks) return;
         try {
@@ -369,12 +378,21 @@
       }
       renderMixerBoard();
     }
-
+// Update this function to handle strict iOS audio playback permissions
     function startAllTracks(options = {}) {
       if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
         if (track.audioEl) {
-          track.audioEl.play().catch(e => console.log("Playback delayed: ", e));
+          // iOS Trick: Force-resume the audio context state if Apple suspended it
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+          track.audioEl.play().catch(e => {
+            console.log("Playback delayed or blocked by iOS: ", e);
+            // Fallback: Attempt a direct hardware play invocation if context choked
+            track.audioEl.muted = false;
+            track.audioEl.play();
+          });
         }
       });
       if (!options.monitoringOnly) {
