@@ -1,4 +1,4 @@
-const CACHE_NAME = '4-track-v4';
+const CACHE_NAME = '4-track-v5';
 const ASSETS = [
   '/4-track/',
   '/4-track/index.html',
