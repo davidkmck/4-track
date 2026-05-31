@@ -284,7 +284,6 @@
   </main>
 
   <script>
-    let audioCtx = null;
     let mediaRecorder = null;
     let recordedChunks = [];
     let isRecording = false;
@@ -302,17 +301,8 @@
     const saveMixBtn = document.getElementById('save-mix-btn');
     const mixerBoard = document.getElementById('mixer-board');
 
-    function initAudio() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-    }
-
+    // FIX: Completely bypassed global live AudioContext setup to stop browser engines from muting standalone hardware element streams
     function unlockAudio() {
-      initAudio();
       tracks.forEach(track => {
         if (track.audioEl) {
           track.audioEl.muted = false;
@@ -339,7 +329,6 @@
     });
 
     recordBtn.addEventListener('click', async () => {
-      initAudio();
       if (isCountdownActive) return;
       
       if (!isRecording) {
@@ -496,6 +485,7 @@
       const track = tracks.find(t => t.id === id);
       if (track) {
         track.currentVolume = parseFloat(val);
+        // Direct internal node volume assignment keeps native playback balanced
         track.audioEl.volume = Math.min(1.0, track.currentVolume);
         document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
       }
@@ -526,8 +516,6 @@
         if (track.audioEl) {
           track.audioEl.muted = false;
           track.audioEl.volume = Math.min(1.0, track.currentVolume);
-          // FIX: Explicitly setting currentTime before calling playback prevents timelines from freezing
-          track.audioEl.currentTime = track.audioEl.currentTime || 0;
           track.audioEl.play().catch(e => console.log("Playback delay: ", e));
         }
       });
@@ -620,22 +608,22 @@
 
     saveMixBtn.addEventListener('click', async () => {
       if (!tracks || tracks.length === 0) return;
-      initAudio();
+      
+      // Localized instantiation inside export ensures context stays clean and isolated from live tab playback streams
+      const exportAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       saveMixBtn.disabled = true;
       saveMixBtn.textContent = "Rendering Mix...";
 
       try {
         const decodePromises = tracks.map(async (track) => {
           const arrayBuffer = await track.blob.arrayBuffer();
-          const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const buffer = await tempCtx.decodeAudioData(arrayBuffer);
-          tempCtx.close();
+          const buffer = await exportAudioCtx.decodeAudioData(arrayBuffer);
           return buffer;
         });
 
         const audioBuffers = await Promise.all(decodePromises);
         const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
-        const sampleRate = audioCtx.sampleRate;
+        const sampleRate = exportAudioCtx.sampleRate;
         const offlineCtx = new OfflineAudioContext(2, sampleRate * maxDuration, sampleRate);
 
         tracks.forEach((track, index) => {
@@ -671,6 +659,7 @@
         console.error("Export failure:", err);
         alert("Failed to export the audio mix.");
       } finally {
+        exportAudioCtx.close();
         saveMixBtn.disabled = false;
         saveMixBtn.textContent = "💾 Save Mix to File";
       }
