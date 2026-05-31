@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,7 +15,6 @@
       --success: #10b981;
       --warning: #f59e0b;
     }
-
     body {
       margin: 0;
       padding: 20px;
@@ -27,38 +25,32 @@
       flex-direction: column;
       align-items: center;
     }
-
     main {
       width: 100%;
       max-width: 500px;
     }
-
     h1 {
       text-align: center;
       font-size: 1.75rem;
       margin-bottom: 5px;
     }
-
     .subtitle {
       text-align: center;
       color: #94a3b8;
       font-size: 0.9rem;
       margin-bottom: 25px;
     }
-
     #controls-sector {
       display: flex;
       flex-direction: column;
       gap: 10px;
       margin-bottom: 30px;
     }
-
     .button-group {
       display: flex;
       gap: 10px;
       width: 100%;
     }
-
     button {
       padding: 12px 15px;
       border: none;
@@ -72,26 +64,22 @@
       justify-content: center;
       gap: 8px;
     }
-
     button:disabled {
       opacity: 0.4;
       cursor: not-allowed;
     }
-
     .btn-record {
       background-color: var(--accent);
       color: white;
       flex: none;
       width: 100%;
     }
-
     .btn-countdown {
       background-color: var(--warning);
       color: white;
       flex: none;
       width: 100%;
     }
-
     .btn-recording {
       background-color: var(--danger);
       animation: pulse 1.5s infinite;
@@ -99,20 +87,17 @@
       flex: none;
       width: 100%;
     }
-
     .btn-global {
       background-color: #475569;
       color: white;
       flex: 1;
     }
-
     .btn-save {
       background-color: var(--success);
       color: white;
       flex: none;
       width: 100%;
     }
-
     .toggle-container {
       display: flex;
       align-items: center;
@@ -124,26 +109,22 @@
       font-weight: 600;
       font-size: 0.95rem;
     }
-
     .toggle-label-group {
       display: flex;
       align-items: center;
       gap: 8px;
     }
-
     .switch {
       position: relative;
       display: inline-block;
       width: 50px;
       height: 26px;
     }
-
     .switch input {
       opacity: 0;
       width: 0;
       height: 0;
     }
-
     .slider-toggle {
       position: absolute;
       cursor: pointer;
@@ -155,7 +136,6 @@
       transition: .3s;
       border-radius: 34px;
     }
-
     .slider-toggle:before {
       position: absolute;
       content: "";
@@ -167,22 +147,18 @@
       transition: .3s;
       border-radius: 50%;
     }
-
     input:checked + .slider-toggle {
       background-color: var(--accent);
     }
-
     input:checked + .slider-toggle:before {
       transform: translateX(24px);
     }
-
     .mixer-board {
       display: flex;
       flex-direction: column;
       gap: 15px;
       width: 100%;
     }
-
     .track-row {
       background-color: var(--card-bg);
       padding: 15px;
@@ -192,18 +168,15 @@
       gap: 12px;
       box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
     }
-
     .track-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
-
     .track-title {
       font-weight: 600;
       color: #cbd5e1;
     }
-
     .btn-delete {
       background-color: transparent;
       color: var(--danger);
@@ -211,36 +184,30 @@
       font-size: 0.85rem;
       flex: none;
     }
-
     .controls-container {
       display: flex;
       flex-direction: column;
       gap: 12px;
     }
-
     .slider-container {
       display: flex;
       flex-direction: column;
       gap: 4px;
     }
-
     .slider-label {
       font-size: 0.75rem;
       color: #94a3b8;
       display: flex;
       justify-content: space-between;
     }
-
     input[type="range"] {
       width: 100%;
       accent-color: var(--accent);
     }
-
     input[type="range"].progress-slider {
       accent-color: var(--success);
       cursor: default;
     }
-
     @keyframes pulse {
       0% { opacity: 1; }
       50% { opacity: 0.6; }
@@ -249,17 +216,22 @@
   </style>
 </head>
 <body>
+
   <main>
     <h1>Quick Multitrack</h1>
     <div class="subtitle">Record cumulative tracks via microphone</div>
 
     <section id="controls-sector">
       <button id="record-btn" class="btn-record">🔴 Record Track 1</button>
+      
+      <button id="import-btn" class="btn-global" style="background-color: #475569; width: 100%; flex: none;">📁 Import Audio File</button>
+      <input type="file" id="audio-file-input" accept="audio/*" style="display: none;">
+
       <div class="button-group">
         <button id="master-play-btn" class="btn-global" disabled>▶️ Play Mix</button>
         <button id="reset-btn" class="btn-global" disabled>⏮️ Restart</button>
       </div>
-      
+
       <div class="toggle-container">
         <div class="toggle-label-group">
           <span>🔁</span>
@@ -295,12 +267,14 @@
     let audioCtx = null;
 
     // ─── DOM refs ─────────────────────────────────────────────────────────────
-    const recordBtn      = document.getElementById('record-btn');
-    const masterPlayBtn  = document.getElementById('master-play-btn');
-    const resetBtn       = document.getElementById('reset-btn');
-    const loopToggle     = document.getElementById('loop-toggle');
-    const saveMixBtn     = document.getElementById('save-mix-btn');
-    const mixerBoard     = document.getElementById('mixer-board');
+    const recordBtn       = document.getElementById('record-btn');
+    const importBtn       = document.getElementById('import-btn');
+    const audioFileInput  = document.getElementById('audio-file-input');
+    const masterPlayBtn   = document.getElementById('master-play-btn');
+    const resetBtn        = document.getElementById('reset-btn');
+    const loopToggle      = document.getElementById('loop-toggle');
+    const saveMixBtn      = document.getElementById('save-mix-btn');
+    const mixerBoard      = document.getElementById('mixer-board');
 
     // ─── AudioContext bootstrap ───────────────────────────────────────────────
     function getAudioContext() {
@@ -341,12 +315,12 @@
 
       if (!isRecording) {
         if (tracks.length >= maxTracks) return;
+
         try {
           localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
           isCountdownActive = true;
           recordBtn.className = 'btn-countdown';
-
+          
           let count = 3;
           recordBtn.textContent = `⏳ Recording starts in ${count}...`;
 
@@ -373,20 +347,40 @@
       }
     });
 
+    // ─── Import functionality ─────────────────────────────────────────────────
+    importBtn.addEventListener('click', () => {
+      if (tracks.length >= maxTracks) return;
+      audioFileInput.click();
+    });
+
+    audioFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!file.type.startsWith('audio/')) {
+        alert('Please select a valid audio file.');
+        return;
+      }
+
+      // Since File inherits from Blob, it seamlessly registers with your code
+      createTrackNode(file);
+      
+      // Clear input so the same file can be imported again if deleted
+      audioFileInput.value = '';
+    });
+
     // ─── Recording logic ──────────────────────────────────────────────────────
     function startHardwareRecording() {
       recordedChunks = [];
-
       if (tracks.length > 0) {
         resetAllPlayheads();
         startAllTracks({ monitoringOnly: true });
       }
 
-      // Pick the best supported MIME type
       const mimeType = getSupportedMimeType();
       const recorderOptions = mimeType ? { mimeType } : {};
-      mediaRecorder = new MediaRecorder(localStream, recorderOptions);
 
+      mediaRecorder = new MediaRecorder(localStream, recorderOptions);
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunks.push(e.data);
       };
@@ -421,14 +415,11 @@
 
     // ─── Track creation ───────────────────────────────────────────────────────
     function createTrackNode(blob) {
-      // Use a Blob URL — much more reliable than base64 on mobile Safari
       const blobUrl = URL.createObjectURL(blob);
-
       const audioEl = new Audio();
       audioEl.src = blobUrl;
       audioEl.loop = false;
       audioEl.preload = 'auto';
-      // Required for iOS to allow Web Audio to tap into the element
       audioEl.setAttribute('playsinline', '');
       audioEl.crossOrigin = 'anonymous';
       audioEl.load();
@@ -438,7 +429,7 @@
         blob,
         blobUrl,
         audioEl,
-        sourceNode: null,  // set by wireTrackToGraph
+        sourceNode: null,
         gainNode:   null,
         panNode:    null,
         currentPan: 0,
@@ -455,334 +446,4 @@
         const progSlider  = document.getElementById(`progress-${trackObject.id}`);
         const currentText = document.getElementById(`current-time-${trackObject.id}`);
         if (progSlider)  progSlider.value       = audioEl.currentTime;
-        if (currentText) currentText.textContent = audioEl.currentTime.toFixed(1) + 's';
-      });
-
-      tracks.push(trackObject);
-      renderMixerBoard();
-    }
-
-    // ─── Mixer UI ─────────────────────────────────────────────────────────────
-    function renderMixerBoard() {
-      mixerBoard.innerHTML = '';
-      tracks.forEach((track, index) => {
-        const totalDurationText = track.duration ? track.duration.toFixed(1) + 's' : '0.0s';
-        const row = document.createElement('div');
-        row.className = 'track-row';
-        row.innerHTML = `
-          <div class="track-header">
-            <span class="track-title">Track ${index + 1}</span>
-            <button class="btn-delete" onclick="deleteTrack(${track.id})">Delete</button>
-          </div>
-          <div class="controls-container">
-            <div class="slider-container">
-              <div class="slider-label">
-                <span>Playback Position</span>
-                <div>
-                  <span id="current-time-${track.id}">0.0s</span> / <span>${totalDurationText}</span>
-                </div>
-              </div>
-              <input type="range" class="progress-slider" id="progress-${track.id}"
-                min="0" max="${track.duration || 0}" step="0.01" value="0" disabled>
-            </div>
-            <div class="slider-container">
-              <div class="slider-label">
-                <span>Volume</span>
-                <span id="vol-txt-${track.id}">${Math.round(track.currentVolume * 100)}%</span>
-              </div>
-              <input type="range" min="0" max="1.5" step="0.05" value="${track.currentVolume}"
-                oninput="updateVolume(${track.id}, this.value)">
-            </div>
-            <div class="slider-container">
-              <div class="slider-label">
-                <span>Left</span>
-                <span>Stereo Pan</span>
-                <span>Right</span>
-              </div>
-              <input type="range" min="-1" max="1" step="0.1" value="${track.currentPan}"
-                oninput="updatePan(${track.id}, this.value)">
-            </div>
-          </div>
-        `;
-        mixerBoard.appendChild(row);
-      });
-      updateUI();
-    }
-
-    function updateVolume(id, val) {
-      const track = tracks.find(t => t.id === id);
-      if (!track) return;
-      track.currentVolume = parseFloat(val);
-      if (track.gainNode) {
-        track.gainNode.gain.value = track.currentVolume;
-      } else {
-        // Fallback if not yet wired (shouldn't happen during playback)
-        track.audioEl.volume = Math.min(1.0, track.currentVolume);
-      }
-      document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
-    }
-
-    function updatePan(id, val) {
-      const track = tracks.find(t => t.id === id);
-      if (!track) return;
-      track.currentPan = parseFloat(val);
-      if (track.panNode) {
-        track.panNode.pan.value = track.currentPan;
-      }
-    }
-
-    function deleteTrack(id) {
-      stopAllTracks();
-      const index = tracks.findIndex(t => t.id === id);
-      if (index !== -1) {
-        const track = tracks[index];
-        track.audioEl.pause();
-        track.audioEl.src = '';
-        // Disconnect Web Audio nodes
-        if (track.sourceNode) {
-          try { track.sourceNode.disconnect(); } catch(e) {}
-        }
-        // Release Blob URL memory
-        URL.revokeObjectURL(track.blobUrl);
-        tracks.splice(index, 1);
-      }
-      renderMixerBoard();
-    }
-
-    // ─── Playback ─────────────────────────────────────────────────────────────
-    masterPlayBtn.addEventListener('click', () => {
-      // AudioContext MUST be created/resumed inside a user gesture
-      getAudioContext();
-      if (isPlayingMix) {
-        stopAllTracks();
-      } else {
-        startAllTracks();
-      }
-    });
-
-    resetBtn.addEventListener('click', () => {
-      getAudioContext();
-      stopAllTracks();
-      resetAllPlayheads();
-    });
-
-    function startAllTracks(options = {}) {
-      if (!tracks || tracks.length === 0) return;
-
-      // Wire every track into the audio graph before playing
-      // (must happen after AudioContext exists, i.e. after user gesture)
-      tracks.forEach(track => {
-        wireTrackToGraph(track);
-        // Re-apply current settings in case they changed
-        if (track.gainNode)  track.gainNode.gain.value  = track.currentVolume;
-        if (track.panNode)   track.panNode.pan.value     = track.currentPan;
-
-        track.audioEl.play().catch(e => console.warn('Play blocked:', e));
-      });
-
-      if (!options.monitoringOnly) {
-        isPlayingMix = true;
-        masterPlayBtn.textContent = '⏸️ Pause Mix';
-      }
-
-      clearInterval(masterLoopInterval);
-      masterLoopInterval = setInterval(checkMasterLoopTimeline, 30);
-    }
-
-    function stopAllTracks() {
-      clearInterval(masterLoopInterval);
-      tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.pause();
-      });
-      isPlayingMix = false;
-      masterPlayBtn.textContent = '▶️ Play Mix';
-    }
-
-    function resetAllPlayheads() {
-      tracks.forEach(track => {
-        if (!track.audioEl) return;
-        track.audioEl.currentTime = 0;
-        const progSlider  = document.getElementById(`progress-${track.id}`);
-        const currentText = document.getElementById(`current-time-${track.id}`);
-        if (progSlider)  progSlider.value       = 0;
-        if (currentText) currentText.textContent = '0.0s';
-      });
-    }
-
-    function checkMasterLoopTimeline() {
-      if (!tracks || tracks.length === 0) return;
-
-      const durations = tracks
-        .map(t => t.duration || t.audioEl.duration || 0)
-        .filter(d => !isNaN(d) && d > 0);
-      if (durations.length === 0) return;
-
-      const maxDuration = Math.max(...durations);
-
-      const loopTriggered = tracks.some(track => {
-        const d = track.duration || track.audioEl.duration || 0;
-        return d >= maxDuration &&
-               (track.audioEl.ended || track.audioEl.currentTime >= maxDuration - 0.04);
-      });
-
-      if (loopTriggered) {
-        if (!loopToggle.checked) {
-          stopAllTracks();
-          resetAllPlayheads();
-          return;
-        }
-        resetAllPlayheads();
-        tracks.forEach(track => {
-          track.audioEl.play().catch(() => {});
-        });
-      }
-    }
-
-    // ─── UI state ─────────────────────────────────────────────────────────────
-    function updateUI() {
-      const noTracks = tracks.length === 0;
-      masterPlayBtn.disabled = noTracks;
-      resetBtn.disabled      = noTracks;
-      saveMixBtn.disabled    = noTracks;
-
-      masterPlayBtn.textContent = isPlayingMix ? '⏸️ Pause Mix' : '▶️ Play Mix';
-
-      if (isRecording || isCountdownActive) return; // don't clobber recording state
-
-      if (tracks.length >= maxTracks) {
-        recordBtn.disabled    = true;
-        recordBtn.textContent = '🚫 Max Tracks Reached';
-        recordBtn.className   = 'btn-record';
-      } else {
-        recordBtn.disabled    = false;
-        recordBtn.textContent = `🔴 Record Track ${tracks.length + 1}`;
-        recordBtn.className   = 'btn-record';
-      }
-    }
-
-    // ─── Export ───────────────────────────────────────────────────────────────
-    saveMixBtn.addEventListener('click', async () => {
-      if (!tracks || tracks.length === 0) return;
-
-      const exportAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      saveMixBtn.disabled    = true;
-      saveMixBtn.textContent = 'Rendering Mix...';
-
-      try {
-        const audioBuffers = await Promise.all(
-          tracks.map(async track => {
-            const arrayBuffer = await track.blob.arrayBuffer();
-            return exportAudioCtx.decodeAudioData(arrayBuffer);
-          })
-        );
-
-        const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
-        const sampleRate  = exportAudioCtx.sampleRate;
-        const offlineCtx  = new OfflineAudioContext(2, Math.ceil(sampleRate * maxDuration), sampleRate);
-
-        tracks.forEach((track, index) => {
-          const bufferSource = offlineCtx.createBufferSource();
-          bufferSource.buffer = audioBuffers[index];
-
-          const offlineGain   = offlineCtx.createGain();
-          offlineGain.gain.value = track.currentVolume;
-
-          const offlinePanner = offlineCtx.createStereoPanner();
-          offlinePanner.pan.value = track.currentPan;
-
-          bufferSource.connect(offlineGain);
-          offlineGain.connect(offlinePanner);
-          offlinePanner.connect(offlineCtx.destination);
-          bufferSource.start(0);
-        });
-
-        const renderedBuffer = await offlineCtx.startRendering();
-        const wavBlob        = audioBufferToWav(renderedBuffer);
-        const downloadUrl    = URL.createObjectURL(wavBlob);
-
-        const anchor = document.createElement('a');
-        anchor.href     = downloadUrl;
-        anchor.download = `4track-mix-${Date.now()}.wav`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(downloadUrl);
-
-      } catch (err) {
-        console.error('Export failure:', err);
-        alert('Failed to export the audio mix.');
-      } finally {
-        exportAudioCtx.close();
-        saveMixBtn.disabled    = false;
-        saveMixBtn.textContent = '💾 Save Mix to File';
-      }
-    });
-
-    // ─── WAV encoder ──────────────────────────────────────────────────────────
-    function audioBufferToWav(buffer) {
-      const numOfChan = buffer.numberOfChannels;
-      const sampleRate = buffer.sampleRate;
-      const bitDepth   = 16;
-
-      let result;
-      if (numOfChan === 2) {
-        result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
-      } else {
-        result = buffer.getChannelData(0);
-      }
-
-      const bufferArr = new ArrayBuffer(44 + result.length * 2);
-      const view      = new DataView(bufferArr);
-
-      writeString(view, 0,  'RIFF');
-      view.setUint32(4,  36 + result.length * 2, true);
-      writeString(view, 8,  'WAVE');
-      writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1,  true);   // PCM
-      view.setUint16(22, numOfChan,  true);
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
-      view.setUint16(32, numOfChan * (bitDepth / 8), true);
-      view.setUint16(34, bitDepth,   true);
-      writeString(view, 36, 'data');
-      view.setUint32(40, result.length * 2, true);
-
-      let offset = 44;
-      for (let i = 0; i < result.length; i++, offset += 2) {
-        const s = Math.max(-1, Math.min(1, result[i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-      }
-
-      return new Blob([view], { type: 'audio/wav' });
-    }
-
-    function interleave(inputL, inputR) {
-      const length = inputL.length + inputR.length;
-      const result = new Float32Array(length);
-      let index = 0, inputIndex = 0;
-      while (index < length) {
-        result[index++] = inputL[inputIndex];
-        result[index++] = inputR[inputIndex];
-        inputIndex++;
-      }
-      return result;
-    }
-
-    function writeString(view, offset, string) {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    }
-
-    // ─── Service Worker ───────────────────────────────────────────────────────
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
-          .then(reg => console.log('Service Worker connected!'))
-          .catch(err => console.log('SW registration issue:', err));
-      });
-    }
-  </script>
-</body>
-</html>
+        if (currentText) currentText.textContent = audioEl.currentTime.toFixed(1
