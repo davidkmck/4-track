@@ -304,17 +304,27 @@
   }
 }
 
-function unlockAudio() {
+    function unlockAudio() {
+  // 1. Resume the context
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  
+  // 2. Pulse the audio elements to clear the "silent" state
   for (let i = 0; i < maxTracks; i++) {
     const el = document.getElementById(`ios-audio-${i}`);
     if (el) {
-      el.muted = false; // Ensure it's not muted
+      el.muted = false;
+      // We play and immediately pause. This registers the element 
+      // as "active" in the browser's media player subsystem.
       el.play().then(() => {
-        el.pause(); // Just a quick "pulse" to unlock the hardware
-      }).catch(e => console.log("Unlock failed:", e));
+        el.pause();
+        el.currentTime = 0;
+      }).catch(e => console.log("Unlock pulse failed:", e));
     }
   }
 }
+
     
     masterPlayBtn.addEventListener('click', () => {
       initAudio();
