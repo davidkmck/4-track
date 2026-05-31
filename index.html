@@ -294,16 +294,31 @@
     const mixerBoard = document.getElementById('mixer-board');
 
     function initAudio() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-    }
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().then(() => {
+      console.log("AudioContext resumed successfully");
+    });
+  }
+}
 
+function unlockAudio() {
+  for (let i = 0; i < maxTracks; i++) {
+    const el = document.getElementById(`ios-audio-${i}`);
+    if (el) {
+      el.muted = false; // Ensure it's not muted
+      el.play().then(() => {
+        el.pause(); // Just a quick "pulse" to unlock the hardware
+      }).catch(e => console.log("Unlock failed:", e));
+    }
+  }
+}
+    
     masterPlayBtn.addEventListener('click', () => {
       initAudio();
+      unlockAudio();
       if (isPlayingMix) {
         stopAllTracks();
       } else {
@@ -319,6 +334,7 @@
 
     recordBtn.addEventListener('click', async () => {
       initAudio();
+      unlockAudio();
       
       if (tracks && tracks.length > 0) {
         tracks.forEach(t => {
