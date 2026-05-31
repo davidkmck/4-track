@@ -393,7 +393,6 @@
         stopAllTracks();
         const blob = new Blob(recordedChunks, { type: 'audio/webm' });
         
-        // Base64 generation fixes duration lookup failure on mobile WebKit browsers completely
         const reader = new FileReader();
         reader.readAsDataURL(blob);
         reader.onloadend = () => {
@@ -527,6 +526,8 @@
         if (track.audioEl) {
           track.audioEl.muted = false;
           track.audioEl.volume = Math.min(1.0, track.currentVolume);
+          // FIX: Explicitly setting currentTime before calling playback prevents timelines from freezing
+          track.audioEl.currentTime = track.audioEl.currentTime || 0;
           track.audioEl.play().catch(e => console.log("Playback delay: ", e));
         }
       });
@@ -563,7 +564,6 @@
       });
     }
 
-    // FIX: Optimized timeline synchronization loops evaluating global array positions directly 
     function checkMasterLoopTimeline() {
       if (!tracks || tracks.length === 0) return;
 
@@ -572,7 +572,6 @@
 
       const maxDuration = Math.max(...activeLengths);
       
-      // Look at the playheads directly. If any track hits the end limit, reset or loop.
       let loopTriggered = false;
       tracks.forEach(track => {
         const d = track.duration || track.audioEl.duration || 0;
