@@ -511,33 +511,60 @@
       renderMixerBoard();
     }
 
-    function startAllTracks(options = {}) {
-      if (!tracks || tracks.length === 0) return;
-      
-      tracks.forEach(track => {
-        if (track.audioEl) {
-          track.audioEl.play().catch(e => console.log("Playback delay: ", e));
-        }
-      });
+    // Global map to store source nodes so we can disconnect them later
+const activeSources = new Map();
 
-      if (!options.monitoringOnly) {
-        isPlayingMix = true;
-        masterPlayBtn.textContent = "⏸️ Pause Mix"; 
-      }
+function startAllTracks(options = {}) {
+  if (!tracks || tracks.length === 0) return;
+  initAudio(); // Ensure context is running
 
-      clearInterval(masterLoopInterval);
-      masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
+  tracks.forEach(track => {
+    // 1. Create a media source from the existing HTMLAudioElement
+    const source = audioCtx.createMediaElementSource(track.audioEl);
+    
+    // 2. Connect to a gain node for volume control
+    const gainNode = audioCtx.createGain();
+    gainNode.gain.value = track.currentVolume;
+    
+    // 3. Connect to a stereo panner
+    const pannerNode = audioCtx.createStereoPanner();
+    pannerNode.pan.value = track.currentPan;
+    
+    // 4. Chain it: Source -> Gain -> Pan -> Destination
+    source.connect(gainNode);
+    gainNode.connect(pannerNode);
+    pannerNode.connect(audioCtx.destination);
+    
+    // Store reference so we can disconnect later
+    activeSources.set(track.id, source);
+    
+    // 5. Play
+    track.audioEl.play().catch(e => console.log("Playback error:", e));
+  });
+
+  if (!options.monitoringOnly) {
+    isPlayingMix = true;
+    masterPlayBtn.textContent = "⏸️ Pause Mix";
+  }
+
+  clearInterval(masterLoopInterval);
+  masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
+}
+
+function stopAllTracks() {
+  clearInterval(masterLoopInterval);
+  tracks.forEach(track => {
+    track.audioEl.pause();
+    // Disconnect the source nodes to clean the graph
+    if (activeSources.has(track.id)) {
+      activeSources.get(track.id).disconnect();
+      activeSources.delete(track.id);
     }
-
-    function stopAllTracks() {
-      clearInterval(masterLoopInterval);
-      if (!tracks || tracks.length === 0) return;
-      tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.pause();
-      });
-      isPlayingMix = false;
-      masterPlayBtn.textContent = "▶️ Play Mix"; 
-    }
+  });
+  isPlayingMix = false;
+  masterPlayBtn.textContent = "▶️ Play Mix";
+}
+    
 
     function resetAllPlayheads() {
       if (!tracks || tracks.length === 0) return;
