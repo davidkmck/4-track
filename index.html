@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -248,12 +249,6 @@
   </style>
 </head>
 <body>
-
-  <audio id="ios-audio-0" playsinline></audio>
-  <audio id="ios-audio-1" playsinline></audio>
-  <audio id="ios-audio-2" playsinline></audio>
-  <audio id="ios-audio-3" playsinline></audio>
-
   <main>
     <h1>Quick Multitrack</h1>
     <div class="subtitle">Record cumulative tracks via microphone</div>
@@ -279,69 +274,82 @@
       <button id="save-mix-btn" class="btn-save" disabled>💾 Save Mix to File</button>
     </section>
 
-    <section class="mixer-board" id="mixer-board">
-      </section>
+    <section class="mixer-board" id="mixer-board"></section>
   </main>
 
   <script>
+    // ─── State ────────────────────────────────────────────────────────────────
     let mediaRecorder = null;
     let recordedChunks = [];
     let isRecording = false;
-    let isCountdownActive = false; 
+    let isCountdownActive = false;
     let isPlayingMix = false;
     let localStream = null;
-    let masterLoopInterval = null; 
+    let masterLoopInterval = null;
     const maxTracks = 4;
+
+    // Each track: { id, blob, blobUrl, audioEl, panNode, gainNode, currentPan, currentVolume, duration }
     const tracks = [];
 
-    const recordBtn = document.getElementById('record-btn');
-    const masterPlayBtn = document.getElementById('master-play-btn');
-    const resetBtn = document.getElementById('reset-btn');
-    const loopToggle = document.getElementById('loop-toggle');
-    const saveMixBtn = document.getElementById('save-mix-btn');
-    const mixerBoard = document.getElementById('mixer-board');
+    // One shared AudioContext for live playback (created on first user gesture)
+    let audioCtx = null;
 
-    // FIX: Completely bypassed global live AudioContext setup to stop browser engines from muting standalone hardware element streams
-    function unlockAudio() {
-      tracks.forEach(track => {
-        if (track.audioEl) {
-          track.audioEl.muted = false;
-          track.audioEl.play().then(() => {
-            track.audioEl.pause();
-          }).catch(() => {});
-        }
-      });
+    // ─── DOM refs ─────────────────────────────────────────────────────────────
+    const recordBtn      = document.getElementById('record-btn');
+    const masterPlayBtn  = document.getElementById('master-play-btn');
+    const resetBtn       = document.getElementById('reset-btn');
+    const loopToggle     = document.getElementById('loop-toggle');
+    const saveMixBtn     = document.getElementById('save-mix-btn');
+    const mixerBoard     = document.getElementById('mixer-board');
+
+    // ─── AudioContext bootstrap ───────────────────────────────────────────────
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
     }
 
-    masterPlayBtn.addEventListener('click', () => {
-      unlockAudio();
-      if (isPlayingMix) {
-        stopAllTracks();
-      } else {
-        startAllTracks();
-      }
-    });
+    // Wire a track's <audio> element into the Web Audio graph so pan works.
+    // Safe to call multiple times — guard with track.sourceNode.
+    function wireTrackToGraph(track) {
+      const ctx = getAudioContext();
+      if (track.sourceNode) return; // already wired
 
-    resetBtn.addEventListener('click', () => {
-      unlockAudio();
-      stopAllTracks();
-      resetAllPlayheads();
-    });
+      const source  = ctx.createMediaElementSource(track.audioEl);
+      const gain    = ctx.createGain();
+      const panner  = ctx.createStereoPanner();
 
+      gain.gain.value   = track.currentVolume;
+      panner.pan.value  = track.currentPan;
+
+      source.connect(gain);
+      gain.connect(panner);
+      panner.connect(ctx.destination);
+
+      track.sourceNode = source;
+      track.gainNode   = gain;
+      track.panNode    = panner;
+    }
+
+    // ─── Record button ────────────────────────────────────────────────────────
     recordBtn.addEventListener('click', async () => {
       if (isCountdownActive) return;
-      
+
       if (!isRecording) {
         if (tracks.length >= maxTracks) return;
         try {
           localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          
+
           isCountdownActive = true;
-          recordBtn.className = "btn-countdown";
-          
+          recordBtn.className = 'btn-countdown';
+
           let count = 3;
           recordBtn.textContent = `⏳ Recording starts in ${count}...`;
-          
+
           const countdownInterval = setInterval(() => {
             count--;
             if (count > 0) {
@@ -358,83 +366,103 @@
           alert('Could not access microphone. Check site permissions.');
         }
       } else {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
           mediaRecorder.stop();
         }
         isRecording = false;
       }
     });
 
+    // ─── Recording logic ──────────────────────────────────────────────────────
     function startHardwareRecording() {
       recordedChunks = [];
-      
-      if (tracks && tracks.length > 0) {
+
+      if (tracks.length > 0) {
         resetAllPlayheads();
         startAllTracks({ monitoringOnly: true });
       }
 
-      mediaRecorder = new MediaRecorder(localStream);
+      // Pick the best supported MIME type
+      const mimeType = getSupportedMimeType();
+      const recorderOptions = mimeType ? { mimeType } : {};
+      mediaRecorder = new MediaRecorder(localStream, recorderOptions);
+
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunks.push(e.data);
       };
 
       mediaRecorder.onstop = () => {
         stopAllTracks();
-        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-        
-        const reader = new FileReader();
-        reader.readAsDataURL(blob);
-        reader.onloadend = () => {
-          const base64DataUrl = reader.result;
-          createTrackNode(blob, base64DataUrl);
-        };
-        
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        createTrackNode(blob);
+
         if (localStream) {
-          localStream.getTracks().forEach(track => track.stop());
+          localStream.getTracks().forEach(t => t.stop());
+          localStream = null;
         }
         updateUI();
       };
 
       mediaRecorder.start();
       isRecording = true;
-      recordBtn.textContent = "⏹️ Stop Recording";
-      recordBtn.className = "btn-recording";
+      recordBtn.textContent = '⏹️ Stop Recording';
+      recordBtn.className = 'btn-recording';
     }
 
-    function createTrackNode(blob, base64DataUrl) {
-      const trackIndex = tracks.length;
-      const audioEl = document.getElementById(`ios-audio-${trackIndex}`);
-      audioEl.src = base64DataUrl;
+    function getSupportedMimeType() {
+      const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+      ];
+      return candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+    }
+
+    // ─── Track creation ───────────────────────────────────────────────────────
+    function createTrackNode(blob) {
+      // Use a Blob URL — much more reliable than base64 on mobile Safari
+      const blobUrl = URL.createObjectURL(blob);
+
+      const audioEl = new Audio();
+      audioEl.src = blobUrl;
       audioEl.loop = false;
+      audioEl.preload = 'auto';
+      // Required for iOS to allow Web Audio to tap into the element
+      audioEl.setAttribute('playsinline', '');
+      audioEl.crossOrigin = 'anonymous';
       audioEl.load();
 
       const trackObject = {
         id: Date.now(),
+        blob,
+        blobUrl,
         audioEl,
-        blob, 
+        sourceNode: null,  // set by wireTrackToGraph
+        gainNode:   null,
+        panNode:    null,
         currentPan: 0,
         currentVolume: 1.0,
-        duration: 0
+        duration: 0,
       };
 
       audioEl.addEventListener('loadedmetadata', () => {
         trackObject.duration = audioEl.duration || 0;
-        renderMixerBoard(); 
+        renderMixerBoard();
       });
 
       audioEl.addEventListener('timeupdate', () => {
-        const progSlider = document.getElementById(`progress-${trackObject.id}`);
+        const progSlider  = document.getElementById(`progress-${trackObject.id}`);
         const currentText = document.getElementById(`current-time-${trackObject.id}`);
-        if (progSlider && currentText) {
-          progSlider.value = audioEl.currentTime;
-          currentText.textContent = audioEl.currentTime.toFixed(1) + 's';
-        }
+        if (progSlider)  progSlider.value       = audioEl.currentTime;
+        if (currentText) currentText.textContent = audioEl.currentTime.toFixed(1) + 's';
       });
 
       tracks.push(trackObject);
       renderMixerBoard();
     }
 
+    // ─── Mixer UI ─────────────────────────────────────────────────────────────
     function renderMixerBoard() {
       mixerBoard.innerHTML = '';
       tracks.forEach((track, index) => {
@@ -454,15 +482,15 @@
                   <span id="current-time-${track.id}">0.0s</span> / <span>${totalDurationText}</span>
                 </div>
               </div>
-              <input type="range" class="progress-slider" id="progress-${track.id}" min="0" max="${track.duration || 0}" step="0.01" value="0" disabled>
+              <input type="range" class="progress-slider" id="progress-${track.id}"
+                min="0" max="${track.duration || 0}" step="0.01" value="0" disabled>
             </div>
-            
             <div class="slider-container">
               <div class="slider-label">
                 <span>Volume</span>
                 <span id="vol-txt-${track.id}">${Math.round(track.currentVolume * 100)}%</span>
               </div>
-              <input type="range" min="0" max="1.5" step="0.05" value="${track.currentVolume}" 
+              <input type="range" min="0" max="1.5" step="0.05" value="${track.currentVolume}"
                 oninput="updateVolume(${track.id}, this.value)">
             </div>
             <div class="slider-container">
@@ -471,7 +499,7 @@
                 <span>Stereo Pan</span>
                 <span>Right</span>
               </div>
-              <input type="range" min="-1" max="1" step="0.1" value="${track.currentPan}" 
+              <input type="range" min="-1" max="1" step="0.1" value="${track.currentPan}"
                 oninput="updatePan(${track.id}, this.value)">
             </div>
           </div>
@@ -483,18 +511,23 @@
 
     function updateVolume(id, val) {
       const track = tracks.find(t => t.id === id);
-      if (track) {
-        track.currentVolume = parseFloat(val);
-        // Direct internal node volume assignment keeps native playback balanced
+      if (!track) return;
+      track.currentVolume = parseFloat(val);
+      if (track.gainNode) {
+        track.gainNode.gain.value = track.currentVolume;
+      } else {
+        // Fallback if not yet wired (shouldn't happen during playback)
         track.audioEl.volume = Math.min(1.0, track.currentVolume);
-        document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
       }
+      document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
     }
 
     function updatePan(id, val) {
       const track = tracks.find(t => t.id === id);
-      if (track) {
-        track.currentPan = parseFloat(val);
+      if (!track) return;
+      track.currentPan = parseFloat(val);
+      if (track.panNode) {
+        track.panNode.pan.value = track.currentPan;
       }
     }
 
@@ -502,27 +535,54 @@
       stopAllTracks();
       const index = tracks.findIndex(t => t.id === id);
       if (index !== -1) {
-        tracks[index].audioEl.pause();
-        tracks[index].audioEl.src = ""; 
+        const track = tracks[index];
+        track.audioEl.pause();
+        track.audioEl.src = '';
+        // Disconnect Web Audio nodes
+        if (track.sourceNode) {
+          try { track.sourceNode.disconnect(); } catch(e) {}
+        }
+        // Release Blob URL memory
+        URL.revokeObjectURL(track.blobUrl);
         tracks.splice(index, 1);
       }
       renderMixerBoard();
     }
 
+    // ─── Playback ─────────────────────────────────────────────────────────────
+    masterPlayBtn.addEventListener('click', () => {
+      // AudioContext MUST be created/resumed inside a user gesture
+      getAudioContext();
+      if (isPlayingMix) {
+        stopAllTracks();
+      } else {
+        startAllTracks();
+      }
+    });
+
+    resetBtn.addEventListener('click', () => {
+      getAudioContext();
+      stopAllTracks();
+      resetAllPlayheads();
+    });
+
     function startAllTracks(options = {}) {
       if (!tracks || tracks.length === 0) return;
-      
+
+      // Wire every track into the audio graph before playing
+      // (must happen after AudioContext exists, i.e. after user gesture)
       tracks.forEach(track => {
-        if (track.audioEl) {
-          track.audioEl.muted = false;
-          track.audioEl.volume = Math.min(1.0, track.currentVolume);
-          track.audioEl.play().catch(e => console.log("Playback delay: ", e));
-        }
+        wireTrackToGraph(track);
+        // Re-apply current settings in case they changed
+        if (track.gainNode)  track.gainNode.gain.value  = track.currentVolume;
+        if (track.panNode)   track.panNode.pan.value     = track.currentPan;
+
+        track.audioEl.play().catch(e => console.warn('Play blocked:', e));
       });
 
       if (!options.monitoringOnly) {
         isPlayingMix = true;
-        masterPlayBtn.textContent = "⏸️ Pause Mix"; 
+        masterPlayBtn.textContent = '⏸️ Pause Mix';
       }
 
       clearInterval(masterLoopInterval);
@@ -531,41 +591,38 @@
 
     function stopAllTracks() {
       clearInterval(masterLoopInterval);
-      if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
         if (track.audioEl) track.audioEl.pause();
       });
       isPlayingMix = false;
-      masterPlayBtn.textContent = "▶️ Play Mix"; 
+      masterPlayBtn.textContent = '▶️ Play Mix';
     }
 
     function resetAllPlayheads() {
-      if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
-        if (track.audioEl) {
-          track.audioEl.currentTime = 0;
-          const progSlider = document.getElementById(`progress-${track.id}`);
-          const currentText = document.getElementById(`current-time-${track.id}`);
-          if (progSlider) progSlider.value = 0;
-          if (currentText) currentText.textContent = '0.0s';
-        }
+        if (!track.audioEl) return;
+        track.audioEl.currentTime = 0;
+        const progSlider  = document.getElementById(`progress-${track.id}`);
+        const currentText = document.getElementById(`current-time-${track.id}`);
+        if (progSlider)  progSlider.value       = 0;
+        if (currentText) currentText.textContent = '0.0s';
       });
     }
 
     function checkMasterLoopTimeline() {
       if (!tracks || tracks.length === 0) return;
 
-      const activeLengths = tracks.map(t => t.duration || t.audioEl.duration || 0).filter(d => !isNaN(d) && d > 0);
-      if (activeLengths.length === 0) return;
+      const durations = tracks
+        .map(t => t.duration || t.audioEl.duration || 0)
+        .filter(d => !isNaN(d) && d > 0);
+      if (durations.length === 0) return;
 
-      const maxDuration = Math.max(...activeLengths);
-      
-      let loopTriggered = false;
-      tracks.forEach(track => {
+      const maxDuration = Math.max(...durations);
+
+      const loopTriggered = tracks.some(track => {
         const d = track.duration || track.audioEl.duration || 0;
-        if (d >= maxDuration && (track.audioEl.ended || track.audioEl.currentTime >= maxDuration - 0.04)) {
-          loopTriggered = true;
-        }
+        return d >= maxDuration &&
+               (track.audioEl.ended || track.audioEl.currentTime >= maxDuration - 0.04);
       });
 
       if (loopTriggered) {
@@ -576,61 +633,58 @@
         }
         resetAllPlayheads();
         tracks.forEach(track => {
-          if (track.audioEl) {
-            track.audioEl.play().catch(() => {});
-          }
+          track.audioEl.play().catch(() => {});
         });
       }
     }
 
+    // ─── UI state ─────────────────────────────────────────────────────────────
     function updateUI() {
-      const noTracks = !tracks || tracks.length === 0;
+      const noTracks = tracks.length === 0;
       masterPlayBtn.disabled = noTracks;
-      resetBtn.disabled = noTracks;
-      saveMixBtn.disabled = noTracks;
-      
-      if (!isPlayingMix) {
-        masterPlayBtn.textContent = "▶️ Play Mix";
-      } else {
-        masterPlayBtn.textContent = "⏸️ Pause Mix";
-      }
+      resetBtn.disabled      = noTracks;
+      saveMixBtn.disabled    = noTracks;
+
+      masterPlayBtn.textContent = isPlayingMix ? '⏸️ Pause Mix' : '▶️ Play Mix';
+
+      if (isRecording || isCountdownActive) return; // don't clobber recording state
 
       if (tracks.length >= maxTracks) {
-        recordBtn.disabled = true;
-        recordBtn.textContent = "🚫 Max Tracks Reached";
-        recordBtn.className = "btn-record";
+        recordBtn.disabled    = true;
+        recordBtn.textContent = '🚫 Max Tracks Reached';
+        recordBtn.className   = 'btn-record';
       } else {
-        recordBtn.disabled = false;
+        recordBtn.disabled    = false;
         recordBtn.textContent = `🔴 Record Track ${tracks.length + 1}`;
-        recordBtn.className = "btn-record";
+        recordBtn.className   = 'btn-record';
       }
     }
 
+    // ─── Export ───────────────────────────────────────────────────────────────
     saveMixBtn.addEventListener('click', async () => {
       if (!tracks || tracks.length === 0) return;
-      
-      // Localized instantiation inside export ensures context stays clean and isolated from live tab playback streams
+
       const exportAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      saveMixBtn.disabled = true;
-      saveMixBtn.textContent = "Rendering Mix...";
+      saveMixBtn.disabled    = true;
+      saveMixBtn.textContent = 'Rendering Mix...';
 
       try {
-        const decodePromises = tracks.map(async (track) => {
-          const arrayBuffer = await track.blob.arrayBuffer();
-          const buffer = await exportAudioCtx.decodeAudioData(arrayBuffer);
-          return buffer;
-        });
+        const audioBuffers = await Promise.all(
+          tracks.map(async track => {
+            const arrayBuffer = await track.blob.arrayBuffer();
+            return exportAudioCtx.decodeAudioData(arrayBuffer);
+          })
+        );
 
-        const audioBuffers = await Promise.all(decodePromises);
         const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
-        const sampleRate = exportAudioCtx.sampleRate;
-        const offlineCtx = new OfflineAudioContext(2, sampleRate * maxDuration, sampleRate);
+        const sampleRate  = exportAudioCtx.sampleRate;
+        const offlineCtx  = new OfflineAudioContext(2, Math.ceil(sampleRate * maxDuration), sampleRate);
 
         tracks.forEach((track, index) => {
           const bufferSource = offlineCtx.createBufferSource();
           bufferSource.buffer = audioBuffers[index];
 
-          const offlineGain = offlineCtx.createGain();
+          const offlineGain   = offlineCtx.createGain();
           offlineGain.gain.value = track.currentVolume;
 
           const offlinePanner = offlineCtx.createStereoPanner();
@@ -639,16 +693,15 @@
           bufferSource.connect(offlineGain);
           offlineGain.connect(offlinePanner);
           offlinePanner.connect(offlineCtx.destination);
-
           bufferSource.start(0);
         });
 
         const renderedBuffer = await offlineCtx.startRendering();
-        const wavBlob = audioBufferToWav(renderedBuffer);
-        const downloadUrl = URL.createObjectURL(wavBlob);
-        
+        const wavBlob        = audioBufferToWav(renderedBuffer);
+        const downloadUrl    = URL.createObjectURL(wavBlob);
+
         const anchor = document.createElement('a');
-        anchor.href = downloadUrl;
+        anchor.href     = downloadUrl;
         anchor.download = `4track-mix-${Date.now()}.wav`;
         document.body.appendChild(anchor);
         anchor.click();
@@ -656,60 +709,58 @@
         URL.revokeObjectURL(downloadUrl);
 
       } catch (err) {
-        console.error("Export failure:", err);
-        alert("Failed to export the audio mix.");
+        console.error('Export failure:', err);
+        alert('Failed to export the audio mix.');
       } finally {
         exportAudioCtx.close();
-        saveMixBtn.disabled = false;
-        saveMixBtn.textContent = "💾 Save Mix to File";
+        saveMixBtn.disabled    = false;
+        saveMixBtn.textContent = '💾 Save Mix to File';
       }
     });
 
+    // ─── WAV encoder ──────────────────────────────────────────────────────────
     function audioBufferToWav(buffer) {
       const numOfChan = buffer.numberOfChannels;
       const sampleRate = buffer.sampleRate;
-      const format = 1; 
-      const bitDepth = 16;
-      
+      const bitDepth   = 16;
+
       let result;
       if (numOfChan === 2) {
         result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
       } else {
         result = buffer.getChannelData(0);
       }
-      
+
       const bufferArr = new ArrayBuffer(44 + result.length * 2);
-      const view = new DataView(bufferArr);
-      
-      writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + result.length * 2, true);
-      writeString(view, 8, 'WAVE');
+      const view      = new DataView(bufferArr);
+
+      writeString(view, 0,  'RIFF');
+      view.setUint32(4,  36 + result.length * 2, true);
+      writeString(view, 8,  'WAVE');
       writeString(view, 12, 'fmt ');
       view.setUint32(16, 16, true);
-      view.setUint16(20, format, true);
-      view.setUint16(22, numOfChan, true);
+      view.setUint16(20, 1,  true);   // PCM
+      view.setUint16(22, numOfChan,  true);
       view.setUint32(24, sampleRate, true);
       view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
       view.setUint16(32, numOfChan * (bitDepth / 8), true);
-      view.setUint16(34, bitDepth, true);
+      view.setUint16(34, bitDepth,   true);
       writeString(view, 36, 'data');
       view.setUint32(40, result.length * 2, true);
-      
+
       let offset = 44;
       for (let i = 0; i < result.length; i++, offset += 2) {
-        let s = Math.max(-1, Math.min(1, result[i]));
+        const s = Math.max(-1, Math.min(1, result[i]));
         view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
       }
-      
+
       return new Blob([view], { type: 'audio/wav' });
     }
 
     function interleave(inputL, inputR) {
       const length = inputL.length + inputR.length;
       const result = new Float32Array(length);
-      let index = 0;
-      let inputIndex = 0;
-      
+      let index = 0, inputIndex = 0;
       while (index < length) {
         result[index++] = inputL[inputIndex];
         result[index++] = inputR[inputIndex];
@@ -724,11 +775,12 @@
       }
     }
 
+    // ─── Service Worker ───────────────────────────────────────────────────────
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
           .then(reg => console.log('Service Worker connected!'))
-          .catch(err => console.log('SW registration issue: ', err));
+          .catch(err => console.log('SW registration issue:', err));
       });
     }
   </script>
