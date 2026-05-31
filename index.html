@@ -13,6 +13,7 @@
       --accent: #3b82f6;
       --danger: #ef4444;
       --success: #10b981;
+      --warning: #f59e0b;
     }
 
     body {
@@ -64,8 +65,7 @@
       font-weight: 600;
       cursor: pointer;
       font-size: 0.95rem;
-      transition: opacity 0.2s;
-      flex: 1;
+      transition: background-color 0.2s, opacity 0.2s;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -84,6 +84,13 @@
       width: 100%;
     }
 
+    .btn-countdown {
+      background-color: var(--warning);
+      color: white;
+      flex: none;
+      width: 100%;
+    }
+
     .btn-recording {
       background-color: var(--danger);
       animation: pulse 1.5s infinite;
@@ -95,6 +102,7 @@
     .btn-global {
       background-color: #475569;
       color: white;
+      flex: 1;
     }
 
     .btn-save {
@@ -171,6 +179,7 @@
       display: flex;
       flex-direction: column;
       gap: 15px;
+      width: 100%;
     }
 
     .track-row {
@@ -226,7 +235,6 @@
       accent-color: var(--accent);
     }
 
-    /* Style rule specific to the read-only position playhead slider */
     input[type="range"].progress-slider {
       accent-color: var(--success);
       cursor: default;
@@ -280,6 +288,7 @@
     let mediaRecorder = null;
     let recordedChunks = [];
     let isRecording = false;
+    let isCountdownActive = false; 
     let isPlayingMix = false;
     let localStream = null;
     let masterLoopInterval = null; 
@@ -294,40 +303,27 @@
     const mixerBoard = document.getElementById('mixer-board');
 
     function initAudio() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume().then(() => {
-      console.log("AudioContext resumed successfully");
-    });
-  }
-}
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
 
     function unlockAudio() {
-  // 1. Resume the context
-  if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-  
-  // 2. Pulse the audio elements to clear the "silent" state
-  for (let i = 0; i < maxTracks; i++) {
-    const el = document.getElementById(`ios-audio-${i}`);
-    if (el) {
-      el.muted = false;
-      // We play and immediately pause. This registers the element 
-      // as "active" in the browser's media player subsystem.
-      el.play().then(() => {
-        el.pause();
-        el.currentTime = 0;
-      }).catch(e => console.log("Unlock pulse failed:", e));
-    }
-  }
-}
-
-    
-    masterPlayBtn.addEventListener('click', () => {
       initAudio();
+      tracks.forEach(track => {
+        if (track.audioEl) {
+          track.audioEl.muted = false;
+          track.audioEl.play().then(() => {
+            track.audioEl.pause();
+          }).catch(() => {});
+        }
+      });
+    }
+
+    masterPlayBtn.addEventListener('click', () => {
       unlockAudio();
       if (isPlayingMix) {
         stopAllTracks();
@@ -337,58 +333,37 @@
     });
 
     resetBtn.addEventListener('click', () => {
-      initAudio();
+      unlockAudio();
       stopAllTracks();
       resetAllPlayheads();
     });
 
     recordBtn.addEventListener('click', async () => {
       initAudio();
-      unlockAudio();
-      
-      if (tracks && tracks.length > 0) {
-        tracks.forEach(t => {
-          if (t.audioEl) {
-            t.audioEl.play().catch(() => {});
-            t.audioEl.pause();
-          }
-        });
-      }
+      if (isCountdownActive) return;
       
       if (!isRecording) {
         if (tracks.length >= maxTracks) return;
         try {
-          recordedChunks = [];
-          
-          if (tracks && tracks.length > 0) {
-            resetAllPlayheads();
-            startAllTracks({ monitoringOnly: true });
-          }
-
           localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-          mediaRecorder = new MediaRecorder(localStream);
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) recordedChunks.push(e.data);
-          };
-
-          mediaRecorder.onstop = () => {
-            stopAllTracks();
-            const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-            
-            const syncObjectURL = URL.createObjectURL(blob);
-            createTrackNode(blob, syncObjectURL);
-            
-            if (localStream) {
-              localStream.getTracks().forEach(track => track.stop());
+          
+          isCountdownActive = true;
+          recordBtn.className = "btn-countdown";
+          
+          let count = 3;
+          recordBtn.textContent = `⏳ Recording starts in ${count}...`;
+          
+          const countdownInterval = setInterval(() => {
+            count--;
+            if (count > 0) {
+              recordBtn.textContent = `⏳ Recording starts in ${count}...`;
+            } else {
+              clearInterval(countdownInterval);
+              isCountdownActive = false;
+              startHardwareRecording();
             }
-            updateUI();
-          };
+          }, 1000);
 
-          mediaRecorder.start();
-          isRecording = true;
-          recordBtn.textContent = "⏹️ Stop Recording";
-          recordBtn.className = "btn-recording";
         } catch (err) {
           console.error('Microphone access denied:', err);
           alert('Could not access microphone. Check site permissions.');
@@ -401,41 +376,76 @@
       }
     });
 
-    function createTrackNode(blob, trackMediaSourceUrl) {
-  const trackIndex = tracks.length;
-  const audioEl = document.getElementById(`ios-audio-${trackIndex}`);
-  
-  // Use a FileReader to convert the blob to Base64 *before* assigning it to the element.
-  // This makes the data "inline" and forces iOS to process the metadata immediately.
-  const reader = new FileReader();
-  reader.readAsDataURL(blob);
-  reader.onloadend = () => {
-    const base64data = reader.result;
-    audioEl.src = base64data;
-    audioEl.load();
-  };
+    function startHardwareRecording() {
+      recordedChunks = [];
+      
+      if (tracks && tracks.length > 0) {
+        resetAllPlayheads();
+        startAllTracks({ monitoringOnly: true });
+      }
 
-  audioEl.loop = false;
+      mediaRecorder = new MediaRecorder(localStream);
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
 
-  const trackObject = {
-    id: Date.now(),
-    audioEl,
-    blob, 
-    currentPan: 0,
-    currentVolume: 1.0,
-    duration: 0
-  };
+      mediaRecorder.onstop = () => {
+        stopAllTracks();
+        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+        
+        // Base64 generation fixes duration lookup failure on mobile WebKit browsers completely
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => {
+          const base64DataUrl = reader.result;
+          createTrackNode(blob, base64DataUrl);
+        };
+        
+        if (localStream) {
+          localStream.getTracks().forEach(track => track.stop());
+        }
+        updateUI();
+      };
 
-  // Listen for the metadata, and ONLY then set the duration
-  audioEl.addEventListener('loadedmetadata', () => {
-    trackObject.duration = audioEl.duration || 0;
-    renderMixerBoard(); // Update the UI once we finally have the duration!
-  });
+      mediaRecorder.start();
+      isRecording = true;
+      recordBtn.textContent = "⏹️ Stop Recording";
+      recordBtn.className = "btn-recording";
+    }
 
-  tracks.push(trackObject);
-  renderMixerBoard();
-}
-    
+    function createTrackNode(blob, base64DataUrl) {
+      const trackIndex = tracks.length;
+      const audioEl = document.getElementById(`ios-audio-${trackIndex}`);
+      audioEl.src = base64DataUrl;
+      audioEl.loop = false;
+      audioEl.load();
+
+      const trackObject = {
+        id: Date.now(),
+        audioEl,
+        blob, 
+        currentPan: 0,
+        currentVolume: 1.0,
+        duration: 0
+      };
+
+      audioEl.addEventListener('loadedmetadata', () => {
+        trackObject.duration = audioEl.duration || 0;
+        renderMixerBoard(); 
+      });
+
+      audioEl.addEventListener('timeupdate', () => {
+        const progSlider = document.getElementById(`progress-${trackObject.id}`);
+        const currentText = document.getElementById(`current-time-${trackObject.id}`);
+        if (progSlider && currentText) {
+          progSlider.value = audioEl.currentTime;
+          currentText.textContent = audioEl.currentTime.toFixed(1) + 's';
+        }
+      });
+
+      tracks.push(trackObject);
+      renderMixerBoard();
+    }
 
     function renderMixerBoard() {
       mixerBoard.innerHTML = '';
@@ -456,7 +466,7 @@
                   <span id="current-time-${track.id}">0.0s</span> / <span>${totalDurationText}</span>
                 </div>
               </div>
-              <input type="range" class="progress-slider" id="progress-${track.id}" min="0" max="${track.duration || 0}" step="0.05" value="0" disabled>
+              <input type="range" class="progress-slider" id="progress-${track.id}" min="0" max="${track.duration || 0}" step="0.01" value="0" disabled>
             </div>
             
             <div class="slider-container">
@@ -504,55 +514,47 @@
       const index = tracks.findIndex(t => t.id === id);
       if (index !== -1) {
         tracks[index].audioEl.pause();
-        tracks[index].audioEl.removeAttribute('src'); 
-        tracks[index].audioEl.load();
+        tracks[index].audioEl.src = ""; 
         tracks.splice(index, 1);
       }
       renderMixerBoard();
     }
 
-    // Global map to store source nodes so we can disconnect them later
-const activeSources = new Map();
+    function startAllTracks(options = {}) {
+      if (!tracks || tracks.length === 0) return;
+      
+      tracks.forEach(track => {
+        if (track.audioEl) {
+          track.audioEl.muted = false;
+          track.audioEl.volume = Math.min(1.0, track.currentVolume);
+          track.audioEl.play().catch(e => console.log("Playback delay: ", e));
+        }
+      });
 
+      if (!options.monitoringOnly) {
+        isPlayingMix = true;
+        masterPlayBtn.textContent = "⏸️ Pause Mix"; 
+      }
 
-    
-function startAllTracks(options = {}) {
-  if (!tracks || tracks.length === 0) return;
-  initAudio(); 
+      clearInterval(masterLoopInterval);
+      masterLoopInterval = setInterval(checkMasterLoopTimeline, 30);
+    }
 
-  tracks.forEach(track => {
-    track.audioEl.currentTime = 0;
-    // Direct playback path - bypasses AudioContext graph for live monitoring
-    // This is the most compatible way to play audio on iOS
-    track.audioEl.muted = false;
-    track.audioEl.volume = track.currentVolume;
-    track.audioEl.play().catch(e => console.error("Playback error:", e));
-  });
-
-  if (!options.monitoringOnly) {
-    isPlayingMix = true;
-    masterPlayBtn.textContent = "⏸️ Pause Mix";
-  }
-
-  clearInterval(masterLoopInterval);
-  masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
-}
-
-function stopAllTracks() {
-  clearInterval(masterLoopInterval);
-  tracks.forEach(track => {
-    track.audioEl.pause();
-  });
-  isPlayingMix = false;
-  masterPlayBtn.textContent = "▶️ Play Mix";
-}
+    function stopAllTracks() {
+      clearInterval(masterLoopInterval);
+      if (!tracks || tracks.length === 0) return;
+      tracks.forEach(track => {
+        if (track.audioEl) track.audioEl.pause();
+      });
+      isPlayingMix = false;
+      masterPlayBtn.textContent = "▶️ Play Mix"; 
+    }
 
     function resetAllPlayheads() {
       if (!tracks || tracks.length === 0) return;
       tracks.forEach(track => {
         if (track.audioEl) {
           track.audioEl.currentTime = 0;
-          // Immediately sync the UI element to 0 on reset
           const progSlider = document.getElementById(`progress-${track.id}`);
           const currentText = document.getElementById(`current-time-${track.id}`);
           if (progSlider) progSlider.value = 0;
@@ -561,34 +563,36 @@ function stopAllTracks() {
       });
     }
 
+    // FIX: Optimized timeline synchronization loops evaluating global array positions directly 
     function checkMasterLoopTimeline() {
       if (!tracks || tracks.length === 0) return;
 
-      const activeLengths = tracks.map(t => t.duration || t.audioEl.duration || 0).filter(d => !isNaN(d));
+      const activeLengths = tracks.map(t => t.duration || t.audioEl.duration || 0).filter(d => !isNaN(d) && d > 0);
       if (activeLengths.length === 0) return;
 
       const maxDuration = Math.max(...activeLengths);
-      if (maxDuration === 0) return;
-
-      const masterTrack = tracks.find(t => {
-        const d = t.duration || t.audioEl.duration || 0;
-        return d === maxDuration;
-      });
       
-      if (masterTrack && masterTrack.audioEl) {
-        if (masterTrack.audioEl.ended || masterTrack.audioEl.currentTime >= maxDuration - 0.02) {
-          if (!loopToggle.checked) {
-            stopAllTracks();
-            resetAllPlayheads();
-            return;
-          }
-          resetAllPlayheads();
-          tracks.forEach(track => {
-            if (track.audioEl) {
-              track.audioEl.play().catch(() => {});
-            }
-          });
+      // Look at the playheads directly. If any track hits the end limit, reset or loop.
+      let loopTriggered = false;
+      tracks.forEach(track => {
+        const d = track.duration || track.audioEl.duration || 0;
+        if (d >= maxDuration && (track.audioEl.ended || track.audioEl.currentTime >= maxDuration - 0.04)) {
+          loopTriggered = true;
         }
+      });
+
+      if (loopTriggered) {
+        if (!loopToggle.checked) {
+          stopAllTracks();
+          resetAllPlayheads();
+          return;
+        }
+        resetAllPlayheads();
+        tracks.forEach(track => {
+          if (track.audioEl) {
+            track.audioEl.play().catch(() => {});
+          }
+        });
       }
     }
 
