@@ -514,31 +514,19 @@
     // Global map to store source nodes so we can disconnect them later
 const activeSources = new Map();
 
-    function startAllTracks(options = {}) {
+
+    
+function startAllTracks(options = {}) {
   if (!tracks || tracks.length === 0) return;
   initAudio(); 
 
   tracks.forEach(track => {
-    // 1. Reset the internal hardware playback clock
     track.audioEl.currentTime = 0;
-    
-    // 2. Play the element directly, then connect it to the graph
-    // We use a promise to ensure playback starts before we route it
-    track.audioEl.play().then(() => {
-      // Create the graph route only after playback has successfully started
-      try {
-        const source = audioCtx.createMediaElementSource(track.audioEl);
-        const gainNode = audioCtx.createGain();
-        gainNode.gain.value = track.currentVolume;
-        const pannerNode = audioCtx.createStereoPanner();
-        pannerNode.pan.value = track.currentPan;
-
-        source.connect(gainNode).connect(pannerNode).connect(audioCtx.destination);
-        activeSources.set(track.id, source);
-      } catch (e) {
-        console.warn("Source already connected, skipping graph route.");
-      }
-    }).catch(e => console.error("Playback start error:", e));
+    // Direct playback path - bypasses AudioContext graph for live monitoring
+    // This is the most compatible way to play audio on iOS
+    track.audioEl.muted = false;
+    track.audioEl.volume = track.currentVolume;
+    track.audioEl.play().catch(e => console.error("Playback error:", e));
   });
 
   if (!options.monitoringOnly) {
@@ -549,21 +537,15 @@ const activeSources = new Map();
   clearInterval(masterLoopInterval);
   masterLoopInterval = setInterval(checkMasterLoopTimeline, 50);
 }
-    
+
 function stopAllTracks() {
   clearInterval(masterLoopInterval);
   tracks.forEach(track => {
     track.audioEl.pause();
-    // Disconnect the source nodes to clean the graph
-    if (activeSources.has(track.id)) {
-      activeSources.get(track.id).disconnect();
-      activeSources.delete(track.id);
-    }
   });
   isPlayingMix = false;
   masterPlayBtn.textContent = "▶️ Play Mix";
 }
-    
 
     function resetAllPlayheads() {
       if (!tracks || tracks.length === 0) return;
