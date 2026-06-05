@@ -267,7 +267,6 @@
     let isPlayingMix = false;
     let localStream = null;
     
-    // Precise timing nodes and variables
     let masterPlaybackStartTime = 0; 
     let progressAnimationId = null;
     let loopTimeoutId = null;
@@ -288,7 +287,6 @@
     const saveMixBtn      = document.getElementById('save-mix-btn');
     const mixerBoard      = document.getElementById('mixer-board');
 
-    // Sync Slider Value Display
     latencySlider.addEventListener('input', (e) => {
       latencyVal.textContent = `${e.target.value}ms`;
     });
@@ -307,6 +305,9 @@
     // ─── Record button ────────────────────────────────────────────────────────
     recordBtn.addEventListener('click', async () => {
       if (isCountdownActive) return;
+
+      // Initialize audio context right on button click to clear browser constraints
+      getAudioContext();
 
       if (!isRecording) {
         if (tracks.length >= maxTracks) return;
@@ -368,7 +369,6 @@
     function startHardwareRecording() {
       recordedChunks = [];
       
-      // Start playback of backing elements in perfect harmony for reference monitoring
       if (tracks.length > 0) {
         startAllTracks({ monitoringOnly: true });
       }
@@ -385,7 +385,6 @@
         stopAllTracks();
         let rawBlob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
         
-        // Compensate latency right out of the recorder
         const compensationMs = parseInt(latencySlider.value);
         if (compensationMs > 0 && tracks.length > 0) {
           rawBlob = await sliceAudioBlobLatency(rawBlob, compensationMs);
@@ -416,7 +415,6 @@
       return candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
     }
 
-    // Latency Slicer: Removes microsecond input delays from recordings
     async function sliceAudioBlobLatency(blob, msToRemove) {
       const tempCtx = getAudioContext();
       const arrayBuffer = await blob.arrayBuffer();
@@ -434,7 +432,6 @@
       bufferSource.buffer = audioBuffer;
       bufferSource.connect(offlineCtx.destination);
       
-      // Play forward starting past the latency delay window
       bufferSource.start(0, msToRemove / 1000);
       
       const renderedBuffer = await offlineCtx.startRendering();
@@ -446,7 +443,6 @@
       const ctx = getAudioContext();
       const arrayBuffer = await blob.arrayBuffer();
       
-      // Pre-decode audio cleanly into Web Audio API Memory RAM
       const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
 
       const trackObject = {
@@ -540,7 +536,8 @@
 
     // ─── Playback ─────────────────────────────────────────────────────────────
     masterPlayBtn.addEventListener('click', () => {
-      getAudioContext();
+      // Direct physical context initialization
+      const ctx = getAudioContext();
       if (isPlayingMix) {
         stopAllTracks();
       } else {
@@ -559,15 +556,24 @@
       if (!tracks || tracks.length === 0) return;
       const ctx = getAudioContext();
 
-      // Lock down the upcoming execution timeframe precisely
-      const scheduleTime = ctx.currentTime + 0.05; // 50ms scheduling structural safety pad
+      const scheduleTime = ctx.currentTime + 0.05; 
       
-      // Read playhead context setup 
       let baseOffset = tracks[0].playheadOffset;
+      // If loop finished, reset offset to start cleanly
+      if (baseOffset >= Math.max(...tracks.map(t => t.duration))) {
+        baseOffset = 0;
+        tracks.forEach(t => t.playheadOffset = 0);
+      }
+      
       masterPlaybackStartTime = scheduleTime - baseOffset;
 
       tracks.forEach(track => {
-        // Build clear, clean context processing pipelines
+        // Disconnect existing pipelines cleanly if present
+        if (track.sourceNode) {
+          try { track.sourceNode.stop(); } catch(e) {}
+          track.sourceNode.disconnect();
+        }
+
         track.sourceNode = ctx.createBufferSource();
         track.sourceNode.buffer = track.audioBuffer;
 
@@ -581,7 +587,6 @@
         track.gainNode.connect(track.panNode);
         track.panNode.connect(ctx.destination);
 
-        // Turn them on concurrently at the exact same hardware tick
         if (track.playheadOffset < track.duration) {
           track.sourceNode.start(scheduleTime, track.playheadOffset);
         }
@@ -600,7 +605,6 @@
       clearTimeout(loopTimeoutId);
       
       if (audioCtx && isPlayingMix) {
-        // Save current positional timestamps across vectors
         const elapsed = audioCtx.currentTime - masterPlaybackStartTime;
         tracks.forEach(track => {
           track.playheadOffset = elapsed;
@@ -633,7 +637,6 @@
       });
     }
 
-    // High performance UI animation mapping loop
     function updatePlaybackProgressUI() {
       if (!isPlayingMix || !audioCtx) return;
 
@@ -650,7 +653,6 @@
       progressAnimationId = requestAnimationFrame(updatePlaybackProgressUI);
     }
 
-    // Hardware Clock Driven Loop Tracking
     function scheduleMasterLoopTimeout() {
       const maxDuration = Math.max(...tracks.map(t => t.duration));
       const elapsed = audioCtx.currentTime - masterPlaybackStartTime;
@@ -802,10 +804,8 @@
       }
     }
 
-    // Initialize UI constraints cleanly on startup
     updateUI();
 
-    // ─── Service Worker ───────────────────────────────────────────────────────
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
