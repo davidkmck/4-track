@@ -244,6 +244,14 @@
         </label>
       </div>
 
+      <div class="toggle-container" style="flex-direction: column; align-items: stretch; gap: 6px;">
+        <div class="slider-label">
+          <span>⏱️ Mic Alignment Latency</span>
+          <span id="latency-val">80ms</span>
+        </div>
+        <input type="range" id="latency-slider" min="0" max="250" step="5" value="80">
+      </div>
+
       <button id="save-mix-btn" class="btn-save" disabled>💾 Save Mix to File</button>
     </section>
 
@@ -258,7 +266,11 @@
     let isCountdownActive = false;
     let isPlayingMix = false;
     let localStream = null;
-    let masterLoopInterval = null;
+    
+    // Precise timing nodes and variables
+    let masterPlaybackStartTime = 0; 
+    let progressAnimationId = null;
+    let loopTimeoutId = null;
     const maxTracks = 4;
 
     const tracks = [];
@@ -271,10 +283,17 @@
     const masterPlayBtn   = document.getElementById('master-play-btn');
     const resetBtn        = document.getElementById('reset-btn');
     const loopToggle      = document.getElementById('loop-toggle');
+    const latencySlider   = document.getElementById('latency-slider');
+    const latencyVal      = document.getElementById('latency-val');
     const saveMixBtn      = document.getElementById('save-mix-btn');
     const mixerBoard      = document.getElementById('mixer-board');
 
-    // ─── AudioContext bootstrap ───────────────────────────────────────────────
+    // Sync Slider Value Display
+    latencySlider.addEventListener('input', (e) => {
+      latencyVal.textContent = `${e.target.value}ms`;
+    });
+
+    // ─── AudioContext Bootstrap ───────────────────────────────────────────────
     function getAudioContext() {
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -283,26 +302,6 @@
         audioCtx.resume();
       }
       return audioCtx;
-    }
-
-    function wireTrackToGraph(track) {
-      const ctx = getAudioContext();
-      if (track.sourceNode) return;
-
-      const source  = ctx.createMediaElementSource(track.audioEl);
-      const gain    = ctx.createGain();
-      const panner  = ctx.createStereoPanner();
-
-      gain.gain.value   = track.currentVolume;
-      panner.pan.value  = track.currentPan;
-
-      source.connect(gain);
-      gain.connect(panner);
-      panner.connect(ctx.destination);
-
-      track.sourceNode = source;
-      track.gainNode   = gain;
-      track.panNode    = panner;
     }
 
     // ─── Record button ────────────────────────────────────────────────────────
@@ -368,8 +367,9 @@
     // ─── Recording logic ──────────────────────────────────────────────────────
     function startHardwareRecording() {
       recordedChunks = [];
+      
+      // Start playback of backing elements in perfect harmony for reference monitoring
       if (tracks.length > 0) {
-        resetAllPlayheads();
         startAllTracks({ monitoringOnly: true });
       }
 
@@ -381,10 +381,17 @@
         if (e.data.size > 0) recordedChunks.push(e.data);
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         stopAllTracks();
-        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-        createTrackNode(blob);
+        let rawBlob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        
+        // Compensate latency right out of the recorder
+        const compensationMs = parseInt(latencySlider.value);
+        if (compensationMs > 0 && tracks.length > 0) {
+          rawBlob = await sliceAudioBlobLatency(rawBlob, compensationMs);
+        }
+
+        await createTrackNode(rawBlob);
 
         if (localStream) {
           localStream.getTracks().forEach(t => t.stop());
@@ -409,41 +416,51 @@
       return candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
     }
 
+    // Latency Slicer: Removes microsecond input delays from recordings
+    async function sliceAudioBlobLatency(blob, msToRemove) {
+      const tempCtx = getAudioContext();
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+      
+      const sampleRate = audioBuffer.sampleRate;
+      const samplesToRemove = Math.floor((msToRemove / 1000) * sampleRate);
+      
+      if (samplesToRemove >= audioBuffer.length) return blob;
+
+      const newLength = audioBuffer.length - samplesToRemove;
+      const offlineCtx = new OfflineAudioContext(audioBuffer.numberOfChannels, newLength, sampleRate);
+      
+      const bufferSource = offlineCtx.createBufferSource();
+      bufferSource.buffer = audioBuffer;
+      bufferSource.connect(offlineCtx.destination);
+      
+      // Play forward starting past the latency delay window
+      bufferSource.start(0, msToRemove / 1000);
+      
+      const renderedBuffer = await offlineCtx.startRendering();
+      return audioBufferToWav(renderedBuffer);
+    }
+
     // ─── Track creation ───────────────────────────────────────────────────────
-    function createTrackNode(blob) {
-      const blobUrl = URL.createObjectURL(blob);
-      const audioEl = new Audio();
-      audioEl.src = blobUrl;
-      audioEl.loop = false;
-      audioEl.preload = 'auto';
-      audioEl.setAttribute('playsinline', '');
-      audioEl.crossOrigin = 'anonymous';
-      audioEl.load();
+    async function createTrackNode(blob) {
+      const ctx = getAudioContext();
+      const arrayBuffer = await blob.arrayBuffer();
+      
+      // Pre-decode audio cleanly into Web Audio API Memory RAM
+      const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
 
       const trackObject = {
         id: Date.now(),
         blob,
-        blobUrl,
-        audioEl,
+        audioBuffer: decodedBuffer,
         sourceNode: null,
         gainNode:   null,
         panNode:    null,
         currentPan: 0,
         currentVolume: 1.0,
-        duration: 0,
+        duration: decodedBuffer.duration || 0,
+        playheadOffset: 0
       };
-
-      audioEl.addEventListener('loadedmetadata', () => {
-        trackObject.duration = audioEl.duration || 0;
-        renderMixerBoard();
-      });
-
-      audioEl.addEventListener('timeupdate', () => {
-        const progSlider  = document.getElementById(`progress-${trackObject.id}`);
-        const currentText = document.getElementById(`current-time-${trackObject.id}`);
-        if (progSlider)  progSlider.value       = audioEl.currentTime;
-        if (currentText) currentText.textContent = audioEl.currentTime.toFixed(1) + 's';
-      });
 
       tracks.push(trackObject);
       renderMixerBoard();
@@ -498,9 +515,7 @@
       if (!track) return;
       track.currentVolume = parseFloat(val);
       if (track.gainNode) {
-        track.gainNode.gain.value = track.currentVolume;
-      } else {
-        track.audioEl.volume = Math.min(1.0, track.currentVolume);
+        track.gainNode.gain.setValueAtTime(track.currentVolume, audioCtx.currentTime);
       }
       document.getElementById(`vol-txt-${id}`).textContent = `${Math.round(val * 100)}%`;
     }
@@ -510,7 +525,7 @@
       if (!track) return;
       track.currentPan = parseFloat(val);
       if (track.panNode) {
-        track.panNode.pan.value = track.currentPan;
+        track.panNode.pan.setValueAtTime(track.currentPan, audioCtx.currentTime);
       }
     }
 
@@ -518,13 +533,6 @@
       stopAllTracks();
       const index = tracks.findIndex(t => t.id === id);
       if (index !== -1) {
-        const track = tracks[index];
-        track.audioEl.pause();
-        track.audioEl.src = '';
-        if (track.sourceNode) {
-          try { track.sourceNode.disconnect(); } catch(e) {}
-        }
-        URL.revokeObjectURL(track.blobUrl);
         tracks.splice(index, 1);
       }
       renderMixerBoard();
@@ -543,39 +551,81 @@
     resetBtn.addEventListener('click', () => {
       getAudioContext();
       stopAllTracks();
-      resetAllPlayheads();
+      tracks.forEach(t => t.playheadOffset = 0);
+      resetAllProgressUI();
     });
 
     function startAllTracks(options = {}) {
       if (!tracks || tracks.length === 0) return;
+      const ctx = getAudioContext();
+
+      // Lock down the upcoming execution timeframe precisely
+      const scheduleTime = ctx.currentTime + 0.05; // 50ms scheduling structural safety pad
+      
+      // Read playhead context setup 
+      let baseOffset = tracks[0].playheadOffset;
+      masterPlaybackStartTime = scheduleTime - baseOffset;
+
       tracks.forEach(track => {
-        wireTrackToGraph(track);
-        if (track.gainNode)  track.gainNode.gain.value  = track.currentVolume;
-        if (track.panNode)   track.panNode.pan.value     = track.currentPan;
-        track.audioEl.play().catch(e => console.warn('Play blocked:', e));
+        // Build clear, clean context processing pipelines
+        track.sourceNode = ctx.createBufferSource();
+        track.sourceNode.buffer = track.audioBuffer;
+
+        track.gainNode = ctx.createGain();
+        track.gainNode.gain.setValueAtTime(track.currentVolume, ctx.currentTime);
+
+        track.panNode = ctx.createStereoPanner();
+        track.panNode.pan.setValueAtTime(track.currentPan, ctx.currentTime);
+
+        track.sourceNode.connect(track.gainNode);
+        track.gainNode.connect(track.panNode);
+        track.panNode.connect(ctx.destination);
+
+        // Turn them on concurrently at the exact same hardware tick
+        if (track.playheadOffset < track.duration) {
+          track.sourceNode.start(scheduleTime, track.playheadOffset);
+        }
       });
 
       if (!options.monitoringOnly) {
         isPlayingMix = true;
         masterPlayBtn.textContent = '⏸️ Pause Mix';
+        progressAnimationId = requestAnimationFrame(updatePlaybackProgressUI);
+        scheduleMasterLoopTimeout();
       }
-      clearInterval(masterLoopInterval);
-      masterLoopInterval = setInterval(checkMasterLoopTimeline, 30);
     }
 
     function stopAllTracks() {
-      clearInterval(masterLoopInterval);
-      tracks.forEach(track => {
-        if (track.audioEl) track.audioEl.pause();
-      });
+      cancelAnimationFrame(progressAnimationId);
+      clearTimeout(loopTimeoutId);
+      
+      if (audioCtx && isPlayingMix) {
+        // Save current positional timestamps across vectors
+        const elapsed = audioCtx.currentTime - masterPlaybackStartTime;
+        tracks.forEach(track => {
+          track.playheadOffset = elapsed;
+          if (track.sourceNode) {
+            try { track.sourceNode.stop(); } catch(e) {}
+            track.sourceNode.disconnect();
+            track.sourceNode = null;
+          }
+        });
+      } else {
+        tracks.forEach(track => {
+          if (track.sourceNode) {
+            try { track.sourceNode.stop(); } catch(e) {}
+            track.sourceNode.disconnect();
+            track.sourceNode = null;
+          }
+        });
+      }
+
       isPlayingMix = false;
       masterPlayBtn.textContent = '▶️ Play Mix';
     }
 
-    function resetAllPlayheads() {
+    function resetAllProgressUI() {
       tracks.forEach(track => {
-        if (!track.audioEl) return;
-        track.audioEl.currentTime = 0;
         const progSlider  = document.getElementById(`progress-${track.id}`);
         const currentText = document.getElementById(`current-time-${track.id}`);
         if (progSlider)  progSlider.value       = 0;
@@ -583,39 +633,50 @@
       });
     }
 
-    function checkMasterLoopTimeline() {
-      if (!tracks || tracks.length === 0) return;
-      const durations = tracks
-        .map(t => t.duration || t.audioEl.duration || 0)
-        .filter(d => !isNaN(d) && d > 0);
-      if (durations.length === 0) return;
+    // High performance UI animation mapping loop
+    function updatePlaybackProgressUI() {
+      if (!isPlayingMix || !audioCtx) return;
 
-      const maxDuration = Math.max(...durations);
-      const loopTriggered = tracks.some(track => {
-        const d = track.duration || track.audioEl.duration || 0;
-        return d >= maxDuration && (track.audioEl.ended || track.audioEl.currentTime >= maxDuration - 0.04);
+      const elapsed = audioCtx.currentTime - masterPlaybackStartTime;
+      
+      tracks.forEach(track => {
+        const currentPos = Math.min(elapsed, track.duration);
+        const progSlider  = document.getElementById(`progress-${track.id}`);
+        const currentText = document.getElementById(`current-time-${track.id}`);
+        if (progSlider)  progSlider.value       = currentPos;
+        if (currentText) currentText.textContent = currentPos.toFixed(1) + 's';
       });
 
-      if (loopTriggered) {
-        if (!loopToggle.checked) {
-          stopAllTracks();
-          resetAllPlayheads();
-          return;
-        }
-        resetAllPlayheads();
-        tracks.forEach(track => {
-          track.audioEl.play().catch(() => {});
-        });
-      }
+      progressAnimationId = requestAnimationFrame(updatePlaybackProgressUI);
     }
 
-    // ─── UI state ─────────────────────────────────────────────────────────────
+    // Hardware Clock Driven Loop Tracking
+    function scheduleMasterLoopTimeout() {
+      const maxDuration = Math.max(...tracks.map(t => t.duration));
+      const elapsed = audioCtx.currentTime - masterPlaybackStartTime;
+      const timeRemaining = maxDuration - elapsed;
+
+      clearTimeout(loopTimeoutId);
+      
+      loopTimeoutId = setTimeout(() => {
+        if (!isPlayingMix) return;
+
+        stopAllTracks();
+        tracks.forEach(t => t.playheadOffset = 0);
+        resetAllProgressUI();
+
+        if (loopToggle.checked) {
+          startAllTracks();
+        }
+      }, Math.max(0, timeRemaining * 1000));
+    }
+
+    // ─── UI State ─────────────────────────────────────────────────────────────
     function updateUI() {
       const noTracks = tracks.length === 0;
       masterPlayBtn.disabled = noTracks;
       resetBtn.disabled      = noTracks;
       saveMixBtn.disabled    = noTracks;
-      masterPlayBtn.textContent = isPlayingMix ? '⏸️ Pause Mix' : '▶️ Play Mix';
 
       if (isRecording || isCountdownActive) return;
 
@@ -639,29 +700,23 @@
     // ─── Export ───────────────────────────────────────────────────────────────
     saveMixBtn.addEventListener('click', async () => {
       if (!tracks || tracks.length === 0) return;
-      const exportAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       saveMixBtn.disabled    = true;
       saveMixBtn.textContent = 'Rendering Mix...';
 
       try {
-        const audioBuffers = await Promise.all(tracks.map(async track => {
-          const arrayBuffer = await track.blob.arrayBuffer();
-          return exportAudioCtx.decodeAudioData(arrayBuffer);
-        }));
-
-        const maxDuration = Math.max(...audioBuffers.map(b => b.duration));
-        const sampleRate  = exportAudioCtx.sampleRate;
+        const maxDuration = Math.max(...tracks.map(t => t.duration));
+        const sampleRate  = tracks[0].audioBuffer.sampleRate;
         const offlineCtx  = new OfflineAudioContext(2, Math.ceil(sampleRate * maxDuration), sampleRate);
 
-        tracks.forEach((track, index) => {
+        tracks.forEach((track) => {
           const bufferSource = offlineCtx.createBufferSource();
-          bufferSource.buffer = audioBuffers[index];
+          bufferSource.buffer = track.audioBuffer;
 
           const offlineGain   = offlineCtx.createGain();
-          offlineGain.gain.value = track.currentVolume;
+          offlineGain.gain.setValueAtTime(track.currentVolume, 0);
 
           const offlinePanner = offlineCtx.createStereoPanner();
-          offlinePanner.pan.value = track.currentPan;
+          offlinePanner.pan.setValueAtTime(track.currentPan, 0);
 
           bufferSource.connect(offlineGain);
           offlineGain.connect(offlinePanner);
@@ -685,13 +740,12 @@
         console.error('Export failure:', err);
         alert('Failed to export the audio mix.');
       } finally {
-        exportAudioCtx.close();
         saveMixBtn.disabled    = false;
         saveMixBtn.textContent = '💾 Save Mix to File';
       }
     });
 
-    // ─── WAV encoder ──────────────────────────────────────────────────────────
+    // ─── WAV Encoder ──────────────────────────────────────────────────────────
     function audioBufferToWav(buffer) {
       const numOfChan = buffer.numberOfChannels;
       const sampleRate = buffer.sampleRate;
