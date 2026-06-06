@@ -206,7 +206,7 @@
     }
     input[type="range"].progress-slider {
       accent-color: var(--success);
-      cursor: default;
+      cursor: pointer;
     }
     @keyframes pulse {
       0% { opacity: 1; }
@@ -270,6 +270,7 @@
     let masterPlaybackStartTime = 0; 
     let progressAnimationId = null;
     let loopTimeoutId = null;
+    let isScrubbing = false;
     const maxTracks = 4;
 
     const tracks = [];
@@ -305,8 +306,6 @@
     // ─── Record button ────────────────────────────────────────────────────────
     recordBtn.addEventListener('click', async () => {
       if (isCountdownActive) return;
-
-      // Initialize audio context right on button click to clear browser constraints
       getAudioContext();
 
       if (!isRecording) {
@@ -482,7 +481,7 @@
                   <span id="current-time-${track.id}">0.0s</span> / <span>${totalDurationText}</span>
                 </div>
               </div>
-              <input type="range" class="progress-slider" id="progress-${track.id}" min="0" max="${track.duration || 0}" step="0.01" value="0" disabled>
+              <input type="range" class="progress-slider" id="progress-${track.id}" min="0" max="${track.duration || 0}" step="0.01" value="0">
             </div>
             <div class="slider-container">
               <div class="slider-label">
@@ -502,6 +501,21 @@
           </div>
         `;
         mixerBoard.appendChild(row);
+
+        // Bind interactive scrubbing listeners onto the slider layout
+        const progressSlider = row.querySelector(`.progress-slider`);
+        
+        progressSlider.addEventListener('input', (e) => {
+          isScrubbing = true;
+          const targetTime = parseFloat(e.target.value);
+          updateAllProgressUI(targetTime);
+        });
+
+        progressSlider.addEventListener('change', (e) => {
+          const targetTime = parseFloat(e.target.value);
+          scrubPlaybackToTimestamp(targetTime);
+          isScrubbing = false;
+        });
       });
       updateUI();
     }
@@ -536,8 +550,7 @@
 
     // ─── Playback ─────────────────────────────────────────────────────────────
     masterPlayBtn.addEventListener('click', () => {
-      // Direct physical context initialization
-      const ctx = getAudioContext();
+      getAudioContext();
       if (isPlayingMix) {
         stopAllTracks();
       } else {
@@ -559,8 +572,9 @@
       const scheduleTime = ctx.currentTime + 0.05; 
       
       let baseOffset = tracks[0].playheadOffset;
-      // If loop finished, reset offset to start cleanly
-      if (baseOffset >= Math.max(...tracks.map(t => t.duration))) {
+      const maxDuration = Math.max(...tracks.map(t => t.duration));
+      
+      if (baseOffset >= maxDuration) {
         baseOffset = 0;
         tracks.forEach(t => t.playheadOffset = 0);
       }
@@ -568,7 +582,6 @@
       masterPlaybackStartTime = scheduleTime - baseOffset;
 
       tracks.forEach(track => {
-        // Disconnect existing pipelines cleanly if present
         if (track.sourceNode) {
           try { track.sourceNode.stop(); } catch(e) {}
           track.sourceNode.disconnect();
@@ -628,27 +641,45 @@
       masterPlayBtn.textContent = '▶️ Play Mix';
     }
 
-    function resetAllProgressUI() {
+    // Dynamic Scrubbing Engine
+    function scrubPlaybackToTimestamp(targetTime) {
+      const originallyPlaying = isPlayingMix;
+      
+      // Clear out active hardware nodes completely
+      stopAllTracks();
+      
+      // Reposition all internal playhead trackers directly onto the timeline target
       tracks.forEach(track => {
-        const progSlider  = document.getElementById(`progress-${track.id}`);
-        const currentText = document.getElementById(`current-time-${track.id}`);
-        if (progSlider)  progSlider.value       = 0;
-        if (currentText) currentText.textContent = '0.0s';
+        track.playheadOffset = targetTime;
       });
+      
+      updateAllProgressUI(targetTime);
+
+      // Re-trigger the mix fluidly if it was playing beforehand
+      if (originallyPlaying) {
+        startAllTracks();
+      }
     }
 
-    function updatePlaybackProgressUI() {
-      if (!isPlayingMix || !audioCtx) return;
+    function resetAllProgressUI() {
+      updateAllProgressUI(0);
+    }
 
-      const elapsed = audioCtx.currentTime - masterPlaybackStartTime;
-      
+    function updateAllProgressUI(timeInSeconds) {
       tracks.forEach(track => {
-        const currentPos = Math.min(elapsed, track.duration);
+        const currentPos = Math.min(timeInSeconds, track.duration);
         const progSlider  = document.getElementById(`progress-${track.id}`);
         const currentText = document.getElementById(`current-time-${track.id}`);
         if (progSlider)  progSlider.value       = currentPos;
         if (currentText) currentText.textContent = currentPos.toFixed(1) + 's';
       });
+    }
+
+    function updatePlaybackProgressUI() {
+      if (!isPlayingMix || !audioCtx || isScrubbing) return;
+
+      const elapsed = audioCtx.currentTime - masterPlaybackStartTime;
+      updateAllProgressUI(elapsed);
 
       progressAnimationId = requestAnimationFrame(updatePlaybackProgressUI);
     }
