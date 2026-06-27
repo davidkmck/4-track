@@ -4,7 +4,7 @@ const ASSETS = [
   '/4-track/index.html',
   '/4-track/manifest.json',
   '/4-track/icon.png',
-  '/4-track/icon-sml.pgn'
+  '/4-track/icon-sml.png'
 ];
 
 self.addEventListener('install', (event) => {
