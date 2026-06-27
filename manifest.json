@@ -1,7 +1,7 @@
 {
   "name": "Layered Multitrack Studio",
   "short_name": "4-Track",
-  "description": "Record cumulative tracks via your microphone to build custom loops.",
+  "description": "Record cumulative tracks via your microphone or imported tracks to build custom loops.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0f172a",
@@ -9,7 +9,7 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "./icon.png",
+      "src": "./icon-sml.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
